@@ -1,0 +1,910 @@
+openapi: 3.1.0
+info:
+  title: WAM — WhatsApp Marketing API
+  version: 0.1.0
+  description: |
+    WAM — WhatsApp Marketing. Source of truth for HTTP APIs.
+
+    * UI: `GET /api-docs/` (Swagger UI). Spec: `GET /api-docs/openapi.yaml`
+      (alias `GET /openapi.yaml`). Legacy `/swagger*` 301s to `/api-docs/`.
+    * Dashboard: `/dashboard /connect /contacts /templates /campaigns /analytics`
+      (htmx, no React). Labels are embedded in Contacts (`/contacts#labels`), not a separate nav.
+    * Connection pairing (QR/phone/logout/status), number check,
+      one-off send, contacts/labels CRUD + import, templates CRUD + duplicate,
+      campaigns + worker, per-campaign funnel, account overview, CSV export.
+    * Persistence: SQLite (`WAM_DB_PATH`), shared with whatsmeow sqlstore.
+      Auth: single admin (`WAM_ADMIN_PASSWORD`), session cookie.
+  contact:
+    name: WAM
+  license:
+    name: UNLICENSED
+    identifier: UNLICENSED
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://wam.example.com
+    description: Production
+tags:
+  - name: System
+    description: Liveness, readiness, spec.
+  - name: Connection
+    description: WhatsApp pairing + status.
+  - name: Contacts
+    description: Recipients / audiences.
+  - name: Groups
+    description: Labels for contacts, many-to-many. Managed inside Contacts (`#labels`), API remains at `/groups` for compat.
+  - name: Templates
+    description: Reusable message blueprints with variables.
+  - name: Campaigns
+    description: Broadcasts with queue + scheduler.
+  - name: Analytics
+    description: Delivery funnels over campaign_recipients.
+  - name: Messages
+    description: Outbound messaging.
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /readyz:
+    get:
+      tags: [System]
+      operationId: getReady
+      summary: Readiness probe
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/connection:
+    get:
+      tags: [Connection]
+      operationId: getConnection
+      summary: WhatsApp connection status
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+  /api/v1/connection/qr:
+    post:
+      tags: [Connection]
+      operationId: getQR
+      summary: Get pairing QR as PNG data URL
+      responses:
+        '200':
+          description: QR payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QRPayload'
+        '409':
+          description: Already logged in
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '502':
+          description: WhatsApp error
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/connection/pair:
+    post:
+      tags: [Connection]
+      operationId: pairPhone
+      summary: Pair with phone number, returns linking code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: '+15551234567' }
+      responses:
+        '200':
+          description: Pairing code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+        '409':
+          description: Already logged in
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/connection/logout:
+    post:
+      tags: [Connection]
+      operationId: logout
+      summary: Disconnect + wipe session
+      responses:
+        '204': { description: Logged out }
+  /api/v1/contacts:
+    get:
+      tags: [Contacts]
+      operationId: listContacts
+      summary: List contacts
+      parameters:
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageCursor'
+        - name: group_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of contacts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPage'
+    post:
+      tags: [Contacts]
+      operationId: createContact
+      summary: Create contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Phone already exists
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/contacts/import:
+    post:
+      tags: [Contacts]
+      operationId: importContacts
+      summary: Bulk import CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '202':
+          description: Import accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportReceipt'
+  /api/v1/contacts/check:
+    post:
+      tags: [Contacts]
+      operationId: checkContacts
+      summary: Check numbers on WhatsApp via IsOnWhatsApp (live, needs connection)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phones]
+              properties:
+                phones: { type: array, items: { type: string }, maxItems: 50 }
+      responses:
+        '200':
+          description: Check results (unknown/offline numbers report onWhatsApp false)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        phone: { type: string }
+                        onWhatsApp: { type: boolean }
+                        jid: { type: string }
+  /api/v1/contacts/{id}:
+    get:
+      tags: [Contacts]
+      operationId: getContact
+      summary: Get contact
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '200':
+          description: The contact
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Contacts]
+      operationId: updateContact
+      summary: Update contact
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactCreate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Contacts]
+      operationId: deleteContact
+      summary: Delete contact
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '204': { description: Deleted }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/groups:
+    get:
+      tags: [Groups]
+      operationId: listGroups
+      summary: List groups/labels
+      responses:
+        '200':
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Group' }
+    post:
+      tags: [Groups]
+      operationId: createGroup
+      summary: Create group/label
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '409':
+          description: Group name already exists
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/groups/{id}:
+    get:
+      tags: [Groups]
+      operationId: getGroup
+      summary: Get group
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '200':
+          description: The group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Groups]
+      operationId: updateGroup
+      summary: Rename group
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Groups]
+      operationId: deleteGroup
+      summary: Delete group
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '204': { description: Deleted }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/groups/{id}/members:
+    post:
+      tags: [Groups]
+      operationId: setGroupMembers
+      summary: Replace group membership
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contact_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '204': { description: Updated }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/templates:
+    get:
+      tags: [Templates]
+      operationId: listTemplates
+      summary: List templates
+      responses:
+        '200':
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Template' }
+    post:
+      tags: [Templates]
+      operationId: createTemplate
+      summary: Create template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '409':
+          description: Template name already exists
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/templates/{id}:
+    get:
+      tags: [Templates]
+      operationId: getTemplate
+      summary: Get template
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '200':
+          description: The template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Templates]
+      operationId: updateTemplate
+      summary: Update template
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Templates]
+      operationId: deleteTemplate
+      summary: Delete template
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '204': { description: Deleted }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/templates/{id}/duplicate:
+    post:
+      tags: [Templates]
+      operationId: duplicateTemplate
+      summary: Duplicate template
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/campaigns:
+    get:
+      tags: [Campaigns]
+      operationId: listCampaigns
+      summary: List campaigns
+      parameters:
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageCursor'
+      responses:
+        '200':
+          description: A page of campaigns
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignPage'
+    post:
+      tags: [Campaigns]
+      operationId: createCampaign
+      summary: Create campaign, snapshots audience
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/campaigns/{id}:
+    get:
+      tags: [Campaigns]
+      operationId: getCampaign
+      summary: Get campaign by id
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+      responses:
+        '200':
+          description: The campaign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Campaigns]
+      operationId: updateCampaign
+      summary: Update draft/scheduled campaign
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignCreate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          description: Not editable in current status
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Campaigns]
+      operationId: deleteCampaign
+      summary: Delete campaign with recipients
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '204': { description: Deleted }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/campaigns/{id}/start:
+    post:
+      tags: [Campaigns]
+      operationId: startCampaign
+      summary: Start sending
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '202': { description: Started }
+        '400':
+          description: Illegal transition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/campaigns/{id}/pause:
+    post:
+      tags: [Campaigns]
+      operationId: pauseCampaign
+      summary: Pause sending
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '202': { description: Paused }
+        '400':
+          description: Illegal transition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/campaigns/{id}/resume:
+    post:
+      tags: [Campaigns]
+      operationId: resumeCampaign
+      summary: Resume sending
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '202': { description: Resumed }
+        '400':
+          description: Illegal transition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/campaigns/{id}/cancel:
+    post:
+      tags: [Campaigns]
+      operationId: cancelCampaign
+      summary: Cancel campaign
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '202': { description: Cancelled }
+        '400':
+          description: Illegal transition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/campaigns/{id}/recipients:
+    get:
+      tags: [Campaigns]
+      operationId: listRecipients
+      summary: List per-recipient delivery states
+      parameters:
+        - $ref: '#/components/parameters/EntityId'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/PageCursor'
+      responses:
+        '200':
+          description: Recipients
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Recipient' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/analytics/overview:
+    get:
+      tags: [Analytics]
+      operationId: analyticsOverview
+      summary: Account-wide funnel + 14-day timeline
+      responses:
+        '200':
+          description: Overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsOverview'
+  /api/v1/campaigns/{id}/export:
+    get:
+      tags: [Campaigns]
+      operationId: exportCampaign
+      summary: Download campaign recipients as CSV
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/analytics/campaigns/{id}:
+    get:
+      tags: [Analytics]
+      operationId: analyticsCampaign
+      summary: Per-campaign funnel
+      parameters: [{ $ref: '#/components/parameters/EntityId' }]
+      responses:
+        '200':
+          description: Funnel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsFunnel'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/messages/send:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Send one-off message (live, needs connection, 30/min limit)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSend'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageReceipt'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Recipient unreachable or send failed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  parameters:
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PageLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    PageCursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+  schemas:
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status: { type: string, example: ok }
+        service: { type: string, example: wam }
+    Problem:
+      title: RFC 9457 problem+json
+      type: object
+      required: [title, status]
+      properties:
+        type: { type: string, format: uri, default: 'about:blank' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+    Connection:
+      type: object
+      required: [connected]
+      properties:
+        connected: { type: boolean }
+        phone: { type: string, nullable: true }
+        pushName: { type: string, nullable: true }
+    QRPayload:
+      type: object
+      required: [qr]
+      properties:
+        qr: { type: string, description: QR image data URL or pairing string }
+        expiresIn: { type: integer }
+    Campaign:
+      type: object
+      required: [id, name, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        status: { type: string, enum: [draft, scheduled, sending, paused, done, cancelled] }
+        audience:
+          type: object
+          properties:
+            group_ids:
+              type: array
+              items: { type: string, format: uuid }
+            contact_ids:
+              type: array
+              items: { type: string, format: uuid }
+        bodyTemplate: { type: string }
+        scheduledAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    CampaignCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        bodyTemplate: { type: string, description: 'Supports {{name}} variable' }
+        template_id: { type: string, format: uuid, description: 'Optional template to copy body from when bodyTemplate is empty' }
+        group_ids:
+          type: array
+          items: { type: string, format: uuid }
+        contact_ids:
+          type: array
+          items: { type: string, format: uuid }
+        scheduledAt: { type: string, format: date-time, nullable: true }
+    CampaignPage:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Campaign' }
+        nextCursor: { type: string, nullable: true }
+    Recipient:
+      type: object
+      required: [contact_id, status]
+      properties:
+        contact_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, sent, delivered, read, failed, replied] }
+        error: { type: string, nullable: true }
+        sentAt: { type: string, format: date-time, nullable: true }
+    Contact:
+      type: object
+      required: [id, phone, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        phone: { type: string, description: E.164 phone number, example: '+15551234567' }
+        name: { type: string, nullable: true }
+        waOk: { type: boolean, nullable: true }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/Group' }
+        createdAt: { type: string, format: date-time }
+    ContactCreate:
+      type: object
+      required: [phone]
+      properties:
+        phone: { type: string, example: '+15551234567' }
+        name: { type: string }
+        group_ids:
+          type: array
+          items: { type: string, format: uuid }
+    ContactPage:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Contact' }
+        nextCursor: { type: string, nullable: true }
+    ImportReceipt:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: integer }
+        skipped: { type: integer }
+    Group:
+      type: object
+      required: [id, name, contactCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string, nullable: true }
+        contactCount: { type: integer }
+    GroupCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        color: { type: string }
+    Template:
+      type: object
+      required: [id, name, body, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        category: { type: string, enum: [marketing, utility, authentication] }
+        language: { type: string, example: en }
+        header: { type: string, nullable: true }
+        body: { type: string }
+        footer: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    TemplateCreate:
+      type: object
+      required: [name, body]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        body: { type: string }
+        category: { type: string, enum: [marketing, utility, authentication] }
+        language: { type: string }
+    MessageSend:
+      type: object
+      required: [to, body]
+      properties:
+        to: { type: string, description: E.164 recipient, example: '+15551234567' }
+        body: { type: string, minLength: 1 }
+    MessageReceipt:
+      type: object
+      required: [messageId, status]
+      properties:
+        messageId: { type: string, format: uuid }
+        status: { type: string, enum: [queued] }
+    AnalyticsOverview:
+      type: object
+      properties:
+        contacts: { type: integer }
+        groups: { type: integer }
+        campaigns: { type: integer }
+        sent7d: { type: integer }
+        deliveryRate: { type: number, nullable: true }
+        readRate: { type: number, nullable: true }
+        funnel: { $ref: '#/components/schemas/AnalyticsFunnel' }
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              day: { type: string, format: date }
+              sent: { type: integer }
+              delivered: { type: integer }
+              read: { type: integer }
+              failed: { type: integer }
+    AnalyticsFunnel:
+      type: object
+      required: [sent, delivered, read, failed]
+      properties:
+        sent: { type: integer }
+        delivered: { type: integer }
+        read: { type: integer }
+        replied: { type: integer }
+        failed: { type: integer }
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Not found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
