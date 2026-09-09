@@ -1,0 +1,14 @@
+bin/
+.env
+.DS_Store
+*.test
+*.out
+coverage.html
+dist/
+# runtime state: app SQLite db (+WAL sidecars) and data dir (uploads/exports)
+# never commit — recreated at boot
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

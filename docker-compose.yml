@@ -1,0 +1,19 @@
+services:
+  wam:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      WAM_ADDR: ":8080"
+      WAM_ENV: development
+      WAM_PUBLIC_BASE_URL: http://localhost:8080
+      WAM_DB_PATH: /data/wam.db
+      WAM_DATA_DIR: /data
+    volumes:
+      - wam-data:/data
+    restart: unless-stopped
+
+volumes:
+  wam-data:

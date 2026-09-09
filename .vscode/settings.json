@@ -1,0 +1,13 @@
+{
+  "files.associations": {
+    "web/templates/**/*.html": "gotemplate",
+    "web/templates/**/*.tmpl": "gotemplate"
+  },
+  "emmet.includeLanguages": {
+    "gotemplate": "html"
+  },
+  "html.validate.styles": false,
+  "[gotemplate]": {
+    "editor.defaultFormatter": "vscode.html-language-features"
+  }
+}
