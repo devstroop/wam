@@ -1,0 +1,11 @@
+{{range .Timeline}}<div style="display:flex;align-items:center;gap:.5rem;margin:.375rem 0">
+  <code style="width:6.5rem">{{.Day}}</code>
+  <div style="display:flex;gap:2px;flex:1;height:1.25rem;align-items:stretch;background:hsl(var(--muted) / .4);border-radius:4px;overflow:hidden">
+    {{if gt .Sent 0}}<span title="{{printf "sent %d" .Sent}}" style="{{printf "flex:%d" .Sent}};background:hsl(var(--muted-foreground) / .55)"></span>{{end}}
+    {{if gt .Delivered 0}}<span title="{{printf "delivered %d" .Delivered}}" style="{{printf "flex:%d" .Delivered}};background:hsl(var(--primary) / .65)"></span>{{end}}
+    {{if gt .Read 0}}<span title="{{printf "read %d" .Read}}" style="{{printf "flex:%d" .Read}};background:hsl(var(--primary))"></span>{{end}}
+    {{if gt .Failed 0}}<span title="{{printf "failed %d" .Failed}}" style="{{printf "flex:%d" .Failed}};background:hsl(var(--destructive) / .85)"></span>{{end}}
+  </div>
+  <span class="muted" style="font-size:.75rem;min-width:11rem">{{.Sent}} sent · {{.Delivered}} dlvd · {{.Read}} read · {{.Failed}} fail</span>
+</div>{{else}}<em class="muted">No sends in the last 14 days.</em>{{end}}
+<div class="muted" style="font-size:.75rem;margin-top:.5rem">Gray sent · green delivered/read · red failed</div>

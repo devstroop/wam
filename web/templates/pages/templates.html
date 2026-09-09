@@ -1,0 +1,83 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Templates</h1>
+    <p>Reusable message blueprints. Use <code>{{"{{name}}"}}</code> — rendered per contact on send.</p>
+  </div>
+  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+    <button class="btn btn-sm" onclick="document.getElementById('create-template-dialog').showModal()">{{template "icon-plus"}}New template</button>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Category</th>
+        <th>Language</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="template-rows" hx-get="/partials/template-rows" hx-trigger="load, refresh" hx-swap="innerHTML">
+      <tr>
+        <td colspan="4"><em class="muted">loading…</em></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<dialog id="create-template-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;" onsubmit="return false;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">New template</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Keep names short. Body supports <code>{{"{{name}}"}}</code>.</p>
+    </div>
+    <div class="form-row"><label class="label" for="ct-name">Name</label><input id="ct-name" class="input" name="name" placeholder="diwali_offer_v1" required /></div>
+    <div class="form-row"><label class="label" for="ct-body">Body</label><textarea id="ct-body" class="textarea" name="body" rows="4" placeholder="Hi {{`{{name}}`}}, festive offer just for you…" required></textarea></div>
+    <div style="display:flex; gap:0.75rem;">
+      <div class="form-row" style="flex:1;"><label class="label" for="ct-cat">Category</label><select id="ct-cat" class="select" name="category"><option value="marketing">marketing</option><option value="utility">utility</option><option value="authentication">authentication</option></select></div>
+      <div class="form-row" style="flex:1;"><label class="label" for="ct-lang">Language</label><input id="ct-lang" class="input" name="language" value="en" placeholder="en" /></div>
+    </div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" hx-post="/api/v1/templates" hx-include="#ct-name,#ct-body,#ct-cat,#ct-lang" hx-swap="none" onclick="setTimeout(()=>{const d=document.getElementById('create-template-dialog'); if(d) d.close();}, 400)">{{template "icon-plus"}}Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="edit-template-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;" onsubmit="return false;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Edit template</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Update your message blueprint.</p>
+    </div>
+    <input type="hidden" id="et-id" />
+    <div class="form-row"><label class="label" for="et-name">Name</label><input id="et-name" class="input" name="name" /></div>
+    <div class="form-row"><label class="label" for="et-body">Body</label><textarea id="et-body" class="textarea" name="body" rows="4"></textarea></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" onclick="editTemplateSave()">{{template "icon-check"}}Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openEditTemplate(btn){
+  const id=btn.getAttribute('data-id'), name=btn.getAttribute('data-name'), body=btn.getAttribute('data-body');
+  document.getElementById('et-id').value=id;
+  document.getElementById('et-name').value=name;
+  document.getElementById('et-body').value=body;
+  document.getElementById('edit-template-dialog').showModal();
+}
+function editTemplateSave(){
+  const id=document.getElementById('et-id').value;
+  const name=document.getElementById('et-name').value;
+  const body=document.getElementById('et-body').value;
+  fetch('/api/v1/templates/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,body})})
+    .then(r=>{if(!r.ok) return r.json().then(j=>{throw new Error(j.detail||r.statusText)}); return r.json()})
+    .then(()=>{document.getElementById('edit-template-dialog').close(); htmx.trigger('#template-rows','refresh'); if(window.toast) toast('Template updated'); else location.reload();})
+    .catch(e=>alert(e.message));
+}
+</script>
+{{end}}

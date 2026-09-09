@@ -1,0 +1,36 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>{{.Campaign.Name}}</h1>
+    <p><span class="badge badge-secondary">{{title .Campaign.Status}}</span> · {{.Campaign.Total}} Recipients</p>
+  </div>
+  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+    {{if or (eq .Campaign.Status "draft") (eq .Campaign.Status "scheduled")}}
+    <button class="btn btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/start" hx-swap="none">{{template
+      "icon-send"}}Start</button>
+    <button class="btn btn-outline btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/cancel" hx-swap="none"
+      hx-confirm="Cancel this campaign? Queued sends stop.">Cancel</button>
+    {{else if eq .Campaign.Status "sending"}}
+    <button class="btn btn-secondary btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/pause" hx-swap="none">Pause</button>
+    <button class="btn btn-outline btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/cancel" hx-swap="none"
+      hx-confirm="Cancel this campaign? Queued sends stop.">Cancel</button>
+    {{else if eq .Campaign.Status "paused"}}
+    <button class="btn btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/resume" hx-swap="none">Resume</button>
+    <button class="btn btn-outline btn-sm" hx-post="/api/v1/campaigns/{{.ID}}/cancel" hx-swap="none"
+      hx-confirm="Cancel this campaign? Queued sends stop.">Cancel</button>
+    {{end}}
+    <a class="btn btn-outline btn-sm" href="/api/v1/campaigns/{{.ID}}/export">{{template "icon-dl"}}Export CSV</a>
+    <button class="btn btn-outline btn-destructive btn-sm" onclick="deleteCampaign()">{{template "icon-trash"}}Delete</button>
+  </div>
+</div>
+<div id="recip-slot" hx-get="/partials/recipient-rows?campaign={{.ID}}"
+  hx-trigger="load, every 5s" hx-swap="innerHTML"><em class="muted">loading recipients…</em></div>
+<script>
+function deleteCampaign(){
+  if(!confirm('Delete campaign "{{.Campaign.Name}}"? Recipient history goes with it. Queued sends stop.')) return;
+  fetch('/api/v1/campaigns/{{.ID}}',{method:'DELETE'})
+    .then(r=>{if(!r.ok) return r.json().then(j=>{throw new Error(j.detail||r.statusText)}); location.href='/campaigns';})
+    .catch(e=>alert(e.message));
+}
+</script>
+{{end}}

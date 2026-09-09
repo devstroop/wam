@@ -1,0 +1,52 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p>Channel, app and data.</p>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">Channel</p>
+      <p class="card-desc">WhatsApp pairing for this server.</p>
+    </div>
+    <div class="card-body" style="display:flex; flex-direction:column; gap:0.75rem;">
+      {{if and .Conn.Connected .Conn.LoggedIn}}
+      <div><span class="badge badge-success"><span class="badge-dot"></span>Connected</span> <span class="muted">{{.Conn.Phone}}</span></div>
+      {{else}}
+      <div><span class="badge badge-muted"><span class="badge-dot"></span>Not Connected</span></div>
+      {{end}}
+      <div style="display:flex; gap:0.5rem;">
+        <a class="btn btn-secondary btn-sm" href="/connect" onclick="openConnectDialog(); return false;">{{template "icon-link"}}Open Connect</a>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">App</p>
+      <p class="card-desc">Runtime info (read-only, from env).</p>
+    </div>
+    <div class="card-body" style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.875rem;">
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">Environment</span><span class="badge badge-muted">{{title .Env}}</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">Base URL</span><span style="word-break:break-all;">{{.BaseURL}}</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">htmx</span><span>v{{.HTMXVersion}}</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">API docs</span>{{if .IsDev}}<a href="/api-docs/" target="_blank" rel="noopener">Swagger UI</a>{{else}}<span class="muted">Disabled in production</span>{{end}}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Data</p>
+    <p class="card-desc">Headline counts with shortcuts.</p>
+  </div>
+  <div class="card-body" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <a class="btn btn-outline btn-sm" href="/contacts">{{template "icon-users"}}{{.Contacts}} Contacts</a>
+    <a class="btn btn-outline btn-sm" href="/contacts">{{template "icon-tag"}}{{.Groups}} Groups</a>
+    <a class="btn btn-outline btn-sm" href="/campaigns">{{template "icon-mega"}}{{.Campaigns}} Campaigns</a>
+    <a class="btn btn-outline btn-sm" href="/templates">{{template "icon-file"}}{{.Templates}} Templates</a>
+  </div>
+</div>
+{{end}}

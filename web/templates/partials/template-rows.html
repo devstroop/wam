@@ -1,0 +1,23 @@
+{{range .Templates}}<tr id="tmpl-{{.ID}}">
+  <td><span class="font-medium">{{.Name}}</span></td>
+  <td><span class="badge badge-secondary">{{title .Category}}</span></td>
+  <td><span class="muted">{{.Language}}</span></td>
+  <td style="text-align:right; display:flex; gap:0.25rem; justify-content:flex-end">
+    <button class="btn btn-ghost btn-xs" data-id="{{.ID}}" data-name="{{.Name}}" data-body="{{.Body}}" onclick="openEditTemplate(this)" title="Edit">Edit</button>
+    <button class="btn btn-ghost btn-xs" hx-post="/api/v1/templates/{{.ID}}/duplicate" hx-swap="none"
+      title="Duplicate">Duplicate</button>
+    <button class="btn btn-ghost btn-xs" hx-delete="/api/v1/templates/{{.ID}}"
+      hx-confirm="Delete template &quot;{{.Name}}&quot;?" hx-swap="none" title="Delete">Delete</button>
+  </td>
+</tr>
+<tr class="template-body-row">
+  <td colspan="4" style="padding:0.6rem 1rem 0.75rem 1rem; background:hsl(var(--muted) / 0.35); border-top:1px dashed hsl(var(--border));">
+    <div style="display:flex; gap:0.6rem; align-items:flex-start;">
+      <span class="muted" style="font-size:0.7rem; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; margin-top:0.15rem;">Body</span>
+      <span style="font-size:0.875rem; line-height:1.5; color:hsl(var(--foreground) / 0.9); word-break:break-word; white-space:pre-wrap;">{{.Body}}</span>
+    </div>
+  </td>
+</tr>
+{{else}}<tr>
+  <td colspan="4"><em class="muted">No templates yet — create one to use in campaigns.</em></td>
+</tr>{{end}}

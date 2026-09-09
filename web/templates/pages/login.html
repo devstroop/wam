@@ -1,0 +1,28 @@
+{{define "content"}}
+<section class="card" style="max-width:24rem;margin:3rem auto">
+  <div class="card-head" style="align-items:center;text-align:center">
+    <span class="brand-mark" style="width:2.5rem;height:2.5rem">{{template "icon-msg"}}</span>
+    <p class="card-title">Welcome back</p>
+    <p class="card-desc">Sign in to your WAM workspace.</p>
+  </div>
+  <div class="card-body">
+    {{if .AuthDisabled}}<div role="status" aria-live="polite" aria-atomic="true" data-slot="alert" data-variant="info"
+      class="alert alert-info">{{template "icon-alert"}}<div data-slot="alert-title" class="alert-title">Authentication
+        disabled</div>
+      <div data-slot="alert-description" class="alert-desc">No <code>WAM_ADMIN_PASSWORD</code> set — <a
+          href="/dashboard">continue to dashboard</a>.</div>
+    </div>{{else}}
+    {{if .Error}}<div role="alert" aria-live="assertive" aria-atomic="true" data-slot="alert" data-variant="destructive"
+      class="alert alert-destructive" style="margin-bottom:1rem">{{template "icon-alert"}}<div data-slot="alert-title"
+        class="alert-title">Authentication failed</div>
+      <div data-slot="alert-description" class="alert-desc">Invalid password. Try again.</div>
+    </div>{{end}}
+    <form method="post" action="/login">
+      <div class="form-row"><label class="label" for="pw">Password</label><input id="pw" class="input" name="password"
+          type="password" placeholder="••••••••" autocomplete="current-password" /></div>
+      <button class="btn btn-block" type="submit">Sign in</button>
+    </form>
+    {{end}}
+  </div>
+</section>
+{{end}}

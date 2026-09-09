@@ -1,0 +1,36 @@
+{{/* landing page — defines "content" used by base layout */}}
+{{define "content"}}
+<section class="hero">
+  <div class="hero-badge"><span class="badge badge-outline">WhatsApp Marketing</span></div>
+  <h1>WhatsApp marketing<br /><span class="accent">made simple.</span></h1>
+  <p class="lead">Import contacts, segment them with labels, broadcast campaigns with live delivery tracking.</p>
+  <div class="hero-cta">
+    <a class="btn btn-lg" href="/dashboard">Open dashboard</a>
+    <!-- <a class="btn btn-lg btn-outline" href="/api-docs/">API Docs</a> -->
+  </div>
+</section>
+
+<section class="hero-grid">
+  <div class="card">
+    <div class="card-body">
+      <span class="feature-icon">{{template "icon-users"}}</span>
+      <p class="card-title">Contacts &amp; labels</p>
+      <p class="card-desc">CSV import, E.164 normalization, WhatsApp number checks, group segmentation.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <span class="feature-icon">{{template "icon-mega"}}</span>
+      <p class="card-title">Campaigns that send</p>
+      <p class="card-desc">Audience snapshots, scheduling, rate-limited sender with pause, resume and cancel.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <span class="feature-icon">{{template "icon-chart"}}</span>
+      <p class="card-title">Delivery analytics</p>
+      <p class="card-desc">Queued → sent → delivered → read funnels per campaign, CSV export.</p>
+    </div>
+  </div>
+</section>
+{{end}}

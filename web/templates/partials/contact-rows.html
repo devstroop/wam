@@ -1,0 +1,12 @@
+{{range .Contacts}}<tr id="contact-{{.ID}}">
+  <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td><code>{{.Phone}}</code></td>
+  <td>{{range .Groups}}<span class="badge badge-secondary">{{.Name}}</span> {{else}}<span class="muted">—</span>{{end}}
+  </td>
+  <td>{{if .WAOk}}<span class="badge badge-success">On WhatsApp</span>{{else}}<span
+      class="badge badge-muted">Unchecked</span>{{end}}</td>
+  <td style="text-align:right"><button class="btn btn-ghost btn-xs" hx-delete="/api/v1/contacts/{{.ID}}"
+      hx-confirm="Delete this contact?" hx-swap="none">Delete</button></td>
+</tr>{{else}}<tr>
+  <td colspan="5"><em class="muted">No contacts yet — add manually or import CSV below.</em></td>
+</tr>{{end}}

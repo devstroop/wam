@@ -1,0 +1,147 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Campaigns</h1>
+    <p>Broadcasts with queue — pick an audience, send via template.</p>
+  </div>
+  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+    <button class="btn btn-sm" onclick="document.getElementById('create-campaign-dialog').showModal()">{{template "icon-plus"}}New campaign</button>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Audience</th>
+        <th>Progress</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="campaign-rows" hx-get="/partials/campaign-rows" hx-trigger="load, refresh" hx-swap="innerHTML">
+      <tr>
+        <td colspan="5"><em class="muted">loading…</em></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<dialog id="create-campaign-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;" onsubmit="return false;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">New campaign</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Audience is snapshotted at creation. Use <code>{{"{{name}}"}}</code> to personalize.</p>
+    </div>
+    <div class="form-row"><label class="label" for="cc-name">Name</label><input id="cc-name" class="input" name="name" placeholder="Diwali offer" required /></div>
+    <div class="form-row"><label class="label" for="cc-template">Template <span class="muted">(optional)</span></label>
+      <select id="cc-template" class="select" name="template_id" onchange="useCampaignTemplate('cc-template','cc-body')">
+        <option value="">Custom message…</option>
+        {{range .Templates}}<option value="{{.ID}}">{{.Name}} — {{truncate .Body 60}}</option>{{else}}<option value="" disabled>No templates — create one first</option>{{end}}
+      </select>
+      <p class="muted" style="font-size:0.75rem; margin-top:0.25rem;">Pick a <a href="/templates">Template</a> to fill the message, or write custom copy below. Uses <code>{{"{{name}}"}}</code>.</p>
+    </div>
+    <div class="form-row"><label class="label" for="cc-body">Message</label><textarea id="cc-body" class="textarea" name="bodyTemplate" rows="4" placeholder="Hi {{`{{name}}`}}, festive offer just for you…"></textarea>
+    </div>
+    <div class="form-row"><span class="label">Audience</span>
+      <div id="cc-audience-tabs" data-slot="tabs" data-tabs data-orientation="horizontal" data-activation="automatic" data-active-tab="groups" class="group/tabs flex flex-col gap-3">
+        <div role="tablist" data-slot="tabs-list" class="inline-flex h-8 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground">
+          <button type="button" role="tab" data-slot="tabs-trigger" data-tab-trigger="groups" class="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1 rounded-md border border-transparent px-3 py-1 text-xs font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] aria-selected:bg-background aria-selected:text-foreground aria-selected:shadow-sm">Groups</button>
+          <button type="button" role="tab" data-slot="tabs-trigger" data-tab-trigger="contacts" class="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1 rounded-md border border-transparent px-3 py-1 text-xs font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] aria-selected:bg-background aria-selected:text-foreground aria-selected:shadow-sm">Contacts</button>
+        </div>
+        <div role="tabpanel" data-slot="tabs-content" data-tab-panel="groups" tabindex="0" class="outline-none">
+          <div class="check-list">{{range .Groups}}<label><input type="checkbox" name="group_ids" value="{{.ID}}" class="cc-group" /> {{.Name}} ({{.ContactCount}})</label>{{else}}<span class="muted">No groups — <a href="/contacts">create groups</a> or select contacts.</span>{{end}}</div>
+        </div>
+        <div role="tabpanel" data-slot="tabs-content" data-tab-panel="contacts" hidden tabindex="0" class="outline-none">
+          <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+            <input id="cc-contact-q" class="input" placeholder="Search contacts…" hx-get="/partials/audience-contacts" hx-target="#cc-audience-list" hx-trigger="keyup changed delay:300ms" hx-include="this" name="q" hx-swap="innerHTML" />
+          </div>
+          <div id="cc-audience-list" style="max-height:220px; overflow-y:auto; border:1px solid hsl(var(--border)); border-radius:calc(var(--radius) - 2px); padding:0.25rem;" hx-get="/partials/audience-contacts" hx-trigger="load" hx-swap="innerHTML"><em class="muted" style="padding:0.5rem; display:block;">Loading contacts…</em></div>
+          <p class="muted" style="font-size:0.75rem; margin-top:0.5rem;">Pick individual contacts. Union with groups.</p>
+        </div>
+      </div>
+      <p class="muted" style="font-size:0.75rem; margin-top:0.5rem;">Empty selection = all contacts.</p>
+    </div>
+    <script>(function(){
+      var el=document.getElementById('cc-audience-tabs');
+      if(!el) return;
+      var active=el.getAttribute('data-active-tab')||'groups';
+      function sync(){
+        el.querySelectorAll('[data-tab-panel]').forEach(function(p){var v=p.getAttribute('data-tab-panel'); var on=v===active; if(on) p.removeAttribute('hidden'); else p.setAttribute('hidden',''); p.setAttribute('aria-labelledby',el.id+'-trigger-'+v); p.id=el.id+'-panel-'+v;});
+        el.querySelectorAll('[data-tab-trigger]').forEach(function(t){var v=t.getAttribute('data-tab-trigger'); var on=v===active; t.setAttribute('aria-selected',on?'true':'false'); t.setAttribute('tabindex',on?'0':'-1'); t.setAttribute('aria-controls',el.id+'-panel-'+v); t.id=el.id+'-trigger-'+v;});
+      }
+      sync();
+      var triggers=[].slice.call(el.querySelectorAll('[data-tab-trigger]'));
+      var list=el.querySelector('[role="tablist"]');
+      if(list) list.addEventListener('keydown',function(e){
+        var idx=triggers.indexOf(document.activeElement); if(idx<0) return; var next=-1;
+        if(e.key==='ArrowRight'||e.key==='ArrowDown') next=(idx+1)%triggers.length;
+        else if(e.key==='ArrowLeft'||e.key==='ArrowUp') next=(idx-1+triggers.length)%triggers.length;
+        else if(e.key==='Home') next=0; else if(e.key==='End') next=triggers.length-1; else return;
+        e.preventDefault(); triggers[next].focus(); triggers[next].click();
+      });
+      el.addEventListener('click',function(e){
+        var t=e.target.closest('[data-tab-trigger]'); if(!t) return;
+        active=t.getAttribute('data-tab-trigger'); el.setAttribute('data-active-tab',active); sync();
+      });
+    })();</script>
+    <div class="form-row"><label class="label" for="cc-sched">Schedule for <span class="muted">(optional, RFC3339)</span></label><input id="cc-sched" class="input" name="scheduledAt" placeholder="2026-10-01T09:00:00Z" /></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" hx-post="/api/v1/campaigns" hx-include="#cc-name,#cc-template,#cc-body,#cc-sched,.cc-group,.cc-contact" hx-swap="none" onclick="setTimeout(()=>{const d=document.getElementById('create-campaign-dialog'); if(d) d.close();}, 400)">{{template "icon-send"}}Create campaign</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="edit-campaign-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;" onsubmit="return false;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Edit campaign</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Only draft campaigns are editable.</p>
+    </div>
+    <input type="hidden" id="ec-id" />
+    <div class="form-row"><label class="label" for="ec-name">Name</label><input id="ec-name" class="input" name="name" /></div>
+    <div class="form-row"><label class="label" for="ec-template">Template <span class="muted">(optional)</span></label>
+      <select id="ec-template" class="select" onchange="useCampaignTemplate('ec-template','ec-body')">
+        <option value="">Keep current message…</option>
+        {{range .Templates}}<option value="{{.ID}}">{{.Name}} — {{truncate .Body 60}}</option>{{end}}
+      </select>
+    </div>
+    <div class="form-row"><label class="label" for="ec-body">Message</label><textarea id="ec-body" class="textarea" name="bodyTemplate" rows="4"></textarea></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" onclick="editCampaignSave()">{{template "icon-check"}}Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function useCampaignTemplate(selectId, targetId){
+  const sel=document.getElementById(selectId);
+  const target=document.getElementById(targetId);
+  if(!sel||!target) return;
+  const id=sel.value;
+  if(!id) return;
+  fetch('/api/v1/templates/'+encodeURIComponent(id))
+    .then(r=>{if(!r.ok) throw new Error('Template not found'); return r.json()})
+    .then(t=>{if(t.body) target.value=t.body; target.focus();})
+    .catch(e=>alert(e.message));
+}
+function openEditCampaign(btn){
+  document.getElementById('ec-id').value=btn.getAttribute('data-id');
+  document.getElementById('ec-name').value=btn.getAttribute('data-name');
+  document.getElementById('ec-body').value=btn.getAttribute('data-body');
+  document.getElementById('edit-campaign-dialog').showModal();
+}
+function editCampaignSave(){
+  const id=document.getElementById('ec-id').value;
+  const name=document.getElementById('ec-name').value;
+  const body=document.getElementById('ec-body').value;
+  fetch('/api/v1/campaigns/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,bodyTemplate:body})})
+    .then(r=>{if(!r.ok) return r.json().then(j=>{throw new Error(j.detail||r.statusText)}); return r.json()})
+    .then(()=>{document.getElementById('edit-campaign-dialog').close(); htmx.trigger('#campaign-rows','refresh'); if(window.toast) toast('Campaign updated'); else location.reload();})
+    .catch(e=>alert(e.message));
+}
+</script>
+{{end}}

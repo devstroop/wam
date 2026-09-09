@@ -1,0 +1,31 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Connect</h1><p>Pair this server to one WhatsApp account.</p></div></div>
+{{if .IsConnected}}
+<div class="card">
+  <div class="card-head"><p class="card-title">Connected account</p><p class="card-desc">Live session — messages send from this number.</p></div>
+  <div class="card-body">
+    <div id="conn-detail-slot" hx-get="/partials/connection-detail" hx-trigger="load, every 10s" hx-swap="innerHTML"><em class="muted">checking…</em></div>
+    <div class="toolbar" style="margin-top:.75rem"><button class="btn btn-outline btn-sm" hx-post="/api/v1/connection/logout" hx-swap="none" hx-confirm="Disconnect and wipe the WhatsApp session?">{{template "icon-out"}}Disconnect</button><a class="btn btn-ghost btn-sm" href="/settings">Settings</a></div>
+  </div>
+</div>
+{{else}}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head"><p class="card-title">Scan QR code</p><p class="card-desc">WhatsApp → Linked devices → Link a device.</p></div>
+    <div class="card-body">
+      <div id="qr-slot" class="slot" role="status" aria-live="polite" aria-atomic="true" style="min-height:200px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.75rem; text-align:center;"><em class="muted">No QR yet — click below to generate.</em></div>
+      <div class="toolbar" style="margin-top:.75rem; justify-content:center;"><button class="btn btn-sm" hx-post="/api/v1/connection/qr" hx-target="#qr-slot" hx-swap="innerHTML" hx-indicator="#qr-spin">{{template "icon-search"}}Get QR code</button><span id="qr-spin" class="muted htmx-indicator">generating…</span></div>
+      <p class="muted" style="font-size:0.78rem; text-align:center; margin-top:.5rem;">Expires in ~2 minutes</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><p class="card-title">Pair with phone number</p><p class="card-desc">Enter the 8-character code under Linked devices → Link with phone number.</p></div>
+    <div class="card-body">
+      <div class="form-row"><label class="label" for="pair-phone">Phone (E.164)</label><input id="pair-phone" class="input" name="phone" inputmode="tel" autocomplete="tel" placeholder="+15551234567" /></div>
+      <button class="btn btn-secondary btn-sm" hx-post="/api/v1/connection/pair" hx-include="#pair-phone" hx-target="#pair-slot" hx-swap="innerHTML" hx-indicator="#pair-spin">{{template "icon-msg"}}Request code</button><span id="pair-spin" class="muted htmx-indicator" style="margin-left:.5rem">requesting…</span>
+      <div id="pair-slot" class="slot" role="status" aria-live="polite" aria-atomic="true" style="margin-top:.75rem; min-height:90px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.5rem; text-align:center;"><em class="muted">Code will appear here.</em></div>
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}

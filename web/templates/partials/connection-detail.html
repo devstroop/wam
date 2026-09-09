@@ -1,0 +1,24 @@
+<div class="conn-detail">
+  {{if and .Connected .LoggedIn}}
+  <span class="conn-avatar">{{template "icon-whatsapp"}}</span>
+  <div class="conn-meta">
+    <div class="conn-phone">{{.Phone}}</div>
+    <div class="muted conn-sub">{{if .PushName}}{{.PushName}} · {{end}}Live — messages will send from this number</div>
+  </div>
+  <span class="badge badge-success"><span class="badge-dot"></span>Live</span>
+  {{else if .Connected}}
+  <span class="conn-avatar is-linking">{{template "icon-link"}}</span>
+  <div class="conn-meta">
+    <div class="conn-phone">Linking…</div>
+    <div class="muted conn-sub">Finishing pairing — watch QR or code above</div>
+  </div>
+  <span class="badge badge-warning"><span class="badge-dot"></span>Linking</span>
+  {{else}}
+  <span class="conn-avatar is-off">{{template "icon-alert"}}</span>
+  <div class="conn-meta">
+    <div class="conn-phone">Not connected</div>
+    <div class="muted conn-sub">Pair below, then <a href="" onclick="location.reload(); return false;">reload</a> to see status</div>
+  </div>
+  <span class="badge badge-warning"><span class="badge-dot"></span>Offline</span>
+  {{end}}
+</div>

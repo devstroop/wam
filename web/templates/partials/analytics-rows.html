@@ -1,0 +1,8 @@
+{{range .Campaigns}}<tr>
+  <td><a href="/campaigns/{{.ID}}">{{.Name}}</a></td>
+  <td><span class="badge badge-secondary">{{title .Status}}</span></td>
+  <td class="muted">{{.Sent}} Sent · {{.Failed}} Failed · {{.Queued}} Queued / {{.Total}}</td>
+  <td><a class="btn btn-ghost btn-xs" href="/api/v1/campaigns/{{.ID}}/export">CSV</a></td>
+</tr>{{else}}<tr>
+  <td colspan="4"><em class="muted">No campaigns yet.</em></td>
+</tr>{{end}}

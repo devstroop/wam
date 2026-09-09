@@ -1,0 +1,149 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Contacts</h1>
+    <p>Audiences for campaigns.</p>
+  </div>
+  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+    <button class="btn btn-outline btn-sm" onclick="openGroupsDrawer()">{{template "icon-tag"}}Groups</button>
+    <button class="btn btn-outline btn-sm" onclick="document.getElementById('import-dialog').showModal()">{{template "icon-upload"}}Import CSV</button>
+    <button class="btn btn-sm" onclick="document.getElementById('add-contact-dialog').showModal()">{{template "icon-plus"}}Add contact</button>
+  </div>
+</div>
+
+<div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem; position:relative; overflow:visible;">
+  <input id="contact-q" class="input" style="flex:1 1 12rem; min-width:0;" name="q" placeholder="Search name or phone…"
+    hx-get="/partials/contact-rows" hx-target="#contact-rows" hx-swap="innerHTML"
+    hx-trigger="keyup changed delay:300ms" hx-include="#contact-group" />
+  <select id="contact-group" class="select" style="width:14rem; max-width:100%; flex-shrink:1;" name="group_id" hx-get="/partials/contact-rows"
+    hx-target="#contact-rows" hx-swap="innerHTML" hx-include="#contact-q">
+    <option value="">All groups</option>
+    {{range .Groups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+  </select>
+</div>
+
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Phone</th>
+        <th>Groups</th>
+        <th>WA</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="contact-rows" hx-get="/partials/contact-rows" hx-trigger="load" hx-swap="innerHTML">
+      <tr>
+        <td colspan="5"><em class="muted">loading…</em></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<dialog id="add-contact-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Add contact</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Numbers are normalized to E.164.</p>
+    </div>
+    <div class="form-row"><label class="label" for="nc-phone">Phone</label><input id="nc-phone" class="input" name="phone" placeholder="+15551234567" required /></div>
+    <div class="form-row"><label class="label" for="nc-name">Name</label><input id="nc-name" class="input" name="name" placeholder="Jane" /></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" hx-post="/api/v1/contacts" hx-include="#nc-phone,#nc-name" hx-swap="none" onclick="setTimeout(()=>document.getElementById('add-contact-dialog').close(), 500)">{{template "icon-plus"}}Add contact</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="groups-drawer" class="modal drawer" aria-labelledby="groups-drawer-title">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem;">
+    <div>
+      <h3 id="groups-drawer-title" style="margin:0; font-size:1.125rem; font-weight:600;">Groups</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Segments for filtering contacts and campaign audiences.</p>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()" aria-label="Close groups">✕</button>
+  </div>
+  <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+    <input id="gd-name" class="input" name="name" placeholder="New group name…" style="flex:1; min-width:0;" />
+    <button class="btn btn-sm" hx-post="/api/v1/groups" hx-include="#gd-name" hx-swap="none" hx-on::after:request="if(ctx.response.status<400){document.getElementById('gd-name').value='';window.__groupsDirty=true;htmx.trigger('#groups-drawer-rows','refresh');}" style="flex-shrink:0;">{{template "icon-plus"}}Create</button>
+  </div>
+  <div class="table-wrap" style="margin-top:1rem;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Members</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="groups-drawer-rows" hx-get="/partials/group-rows" hx-trigger="load, refresh" hx-swap="innerHTML">
+        <tr><td colspan="3"><em class="muted">loading…</em></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="font-size:0.75rem; margin-top:0.75rem;">Deleting a group keeps its members.</p>
+</dialog>
+
+<dialog id="edit-group-dialog" class="modal">
+  <form method="dialog" style="display:flex; flex-direction:column; gap:1rem;" onsubmit="return false;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Edit group</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Rename your group.</p>
+    </div>
+    <input type="hidden" id="eg-id" />
+    <div class="form-row"><label class="label" for="eg-name">Name</label><input id="eg-name" class="input" name="name" required /></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-sm" onclick="editGroupSave()">{{template "icon-check"}}Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openGroupsDrawer(){
+  var d=document.getElementById('groups-drawer');
+  if(!d) return;
+  if(window.htmx) htmx.trigger('#groups-drawer-rows','refresh');
+  d.showModal();
+}
+function openEditGroup(btn){
+  document.getElementById('eg-id').value=btn.getAttribute('data-id');
+  document.getElementById('eg-name').value=btn.getAttribute('data-name');
+  document.getElementById('edit-group-dialog').showModal();
+}
+function editGroupSave(){
+  const id=document.getElementById('eg-id').value;
+  const name=document.getElementById('eg-name').value;
+  fetch('/api/v1/groups/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
+    .then(r=>{if(!r.ok) return r.json().then(j=>{throw new Error(j.detail||r.statusText)}); return r.json()})
+    .then(()=>{document.getElementById('edit-group-dialog').close(); location.reload();})
+    .catch(e=>alert(e.message));
+}
+(function(){
+  var d=document.getElementById('groups-drawer');
+  if(!d) return;
+  d.addEventListener('click',function(e){ if(e.target===d) d.close(); });
+  // Groups changed while open (create/delete): reload once on close so the
+  // filter dropdown and contact rows pick up the new state.
+  d.addEventListener('close',function(){
+    if(window.__groupsDirty){ window.__groupsDirty=false; location.reload(); }
+  });
+})();
+</script>
+
+<dialog id="import-dialog" class="modal">
+  <form hx-post="/api/v1/contacts/import" hx-encoding="multipart/form-data" hx-target="#import-slot" hx-swap="innerHTML" style="display:flex; flex-direction:column; gap:1rem;">
+    <div>
+      <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Import CSV</h3>
+      <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;"><code>phone,name</code> per line, header row optional. Max 5000 rows · 5MB.</p>
+    </div>
+    <div class="form-row"><input class="input" type="file" name="file" accept=".csv,text/csv" required /></div>
+    <div id="import-slot" class="slot" style="min-height:2.5rem;"><em class="muted">Duplicates will be skipped.</em></div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="btn btn-outline btn-sm" type="submit">{{template "icon-upload"}}Upload &amp; import</button>
+    </div>
+  </form>
+</dialog>
+{{end}}

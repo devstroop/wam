@@ -1,0 +1,31 @@
+<div class="partial" style="display:flex; flex-direction:column; gap:1rem;">
+  <div class="funnel-grid">
+    <div class="card"><div class="card-body stat-card"><p class="stat-label">Queued</p><p class="stat">{{.Funnel.Queued}}</p></div></div>
+    <div class="card"><div class="card-body stat-card"><p class="stat-label">Sent</p><p class="stat stat-ok">{{.Funnel.Sent}}</p></div></div>
+    <div class="card"><div class="card-body stat-card"><p class="stat-label">Delivered</p><p class="stat stat-ok">{{.Funnel.Delivered}}</p></div></div>
+    <div class="card"><div class="card-body stat-card"><p class="stat-label">Read</p><p class="stat stat-ok">{{.Funnel.Read}}</p></div></div>
+    <div class="card"><div class="card-body stat-card"><p class="stat-label">Failed</p><p class="stat stat-bad">{{.Funnel.Failed}}</p></div></div>
+  </div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Contact</th>
+          <th>Phone</th>
+          <th>Status</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>{{range .Recipients}}<tr>
+          <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td><code>{{.Phone}}</code></td>
+          <td>{{if eq .Status "failed"}}<span class="badge badge-destructive">{{title .Status}}</span>{{else if eq
+            .Status "queued"}}<span class="badge badge-secondary">{{title .Status}}</span>{{else}}<span
+              class="badge badge-success">{{title .Status}}</span>{{end}}</td>
+          <td class="muted">{{if .Error}}{{.Error}}{{else if .SentAt}}{{.SentAt}}{{else}}—{{end}}</td>
+        </tr>{{else}}<tr>
+          <td colspan="4"><em>No recipients — empty audience snapshot.</em></td>
+        </tr>{{end}}</tbody>
+    </table>
+  </div>
+</div>

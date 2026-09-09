@@ -1,0 +1,88 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Dashboard</h1>
+    <p>Marketing overview</p>
+  </div>
+  <a class="btn btn-sm" href="/campaigns">{{template "icon-plus"}}New campaign</a>
+</div>
+{{if and .Conn.Connected .Conn.LoggedIn}}{{else}}<div role="status" aria-live="polite" aria-atomic="true"
+  data-slot="alert" data-variant="warning" class="alert alert-warning">{{template "icon-alert-triangle"}}<div
+    data-slot="alert-title" class="alert-title">WhatsApp not connected</div>
+  <div data-slot="alert-description" class="alert-desc">Pair your account from <a href="/connect" onclick="openConnectDialog(); return false;">Connect</a> to start
+    sending.</div>
+</div>{{end}}
+<div class="grid-3">
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">Contacts</p><span class="stat-icon">{{template "icon-users"}}</span>
+      </div>
+      <p class="stat">{{.Contacts}}</p>
+      <p class="stat-sub">{{.Groups}} Groups</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">Campaigns</p><span class="stat-icon">{{template "icon-mega"}}</span>
+      </div>
+      <p class="stat">{{.Campaigns}}</p>
+      <p class="stat-sub">{{.Queued}} Queued Sends</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">WhatsApp</p><span class="stat-icon">{{template "icon-msg"}}</span>
+      </div>
+      {{if and .Conn.Connected .Conn.LoggedIn}}<p class="stat" style="font-size:1.25rem">{{.Conn.Phone}}</p>
+      <p class="stat-sub"><span class="badge badge-success">Connected</span></p>{{else}}<p class="stat"
+        style="font-size:1.25rem">Offline</p>
+      <p class="stat-sub"><a href="/connect" onclick="openConnectDialog(); return false;">Pair now</a></p>{{end}}
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Delivery funnel</p>
+    <p class="card-desc">All campaigns combined.</p>
+  </div>
+  <div class="card-body">
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <span class="badge badge-muted">Queued {{.Funnel.Queued}}</span>
+      <span class="badge badge-success">Sent {{.Funnel.Sent}}</span>
+      <span class="badge badge-success">Delivered {{.Funnel.Delivered}}</span>
+      <span class="badge badge-success">Read {{.Funnel.Read}}</span>
+      <span class="badge badge-destructive">Failed {{.Funnel.Failed}}</span>
+    </div>
+  </div>
+</div>
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">Quick actions</p>
+      <p class="card-desc">Jump to the most common tasks.</p>
+    </div>
+    <div class="card-body" style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <a class="btn btn-secondary btn-sm" href="/connect" onclick="openConnectDialog(); return false;">{{template "icon-link"}}Pair WhatsApp</a>
+      <a class="btn btn-secondary btn-sm" href="/contacts">{{template "icon-upload"}}Import contacts</a>
+      <a class="btn btn-outline btn-sm" href="/analytics">{{template "icon-chart"}}View analytics</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">Recent campaigns</p>
+    </div>
+    <div class="table-wrap" style="border:0">
+      <table class="table">
+        <tbody id="recent-slot" hx-get="/partials/campaign-rows" hx-trigger="load" hx-swap="innerHTML">
+          <tr>
+            <td><em class="muted">loading…</em></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}

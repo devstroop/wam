@@ -1,0 +1,75 @@
+<div style="display:flex; flex-direction:column; gap:1rem;">
+  <div>
+    {{if and .Connected .LoggedIn}}
+    <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Connected account</h3>
+    <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Live session — messages send from this number.</p>
+    {{else}}
+    <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Link a device</h3>
+    <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Pair this server with your WhatsApp account.</p>
+    {{end}}
+  </div>
+  {{if and .Connected .LoggedIn}}
+  <div class="conn-detail">
+    <span class="conn-avatar">{{template "icon-whatsapp"}}</span>
+    <div class="conn-meta">
+      <div class="conn-phone">{{.Phone}}</div>
+      <div class="muted conn-sub">{{if .PushName}}{{.PushName}} · {{end}}Live — messages will send from this number</div>
+    </div>
+    <span class="badge badge-success"><span class="badge-dot"></span>Live</span>
+  </div>
+  <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.25rem;">
+    <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Close</button>
+    <button type="button" class="btn btn-outline btn-sm" hx-post="/api/v1/connection/logout" hx-swap="none" hx-confirm="Disconnect and wipe the WhatsApp session?">{{template "icon-out"}}Disconnect</button>
+  </div>
+  {{else}}
+  <div class="cd-tablist" role="tablist" aria-label="Linking method">
+    <button type="button" role="tab" id="cd-tab-qr" aria-controls="cd-panel-qr" aria-selected="true" tabindex="0" data-cd-tab="qr" class="cd-tab">Scan QR</button>
+    <button type="button" role="tab" id="cd-tab-pair" aria-controls="cd-panel-pair" aria-selected="false" tabindex="-1" data-cd-tab="pair" class="cd-tab">Pair with code</button>
+  </div>
+  <div id="cd-panel-qr" role="tabpanel" aria-labelledby="cd-tab-qr" tabindex="0">
+    <div id="cd-qr-slot" class="slot" role="status" aria-live="polite" aria-atomic="true" style="min-height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.75rem; text-align:center;"><em class="muted">No QR yet — click below to generate.</em></div>
+    <div class="toolbar" style="margin-top:.75rem; justify-content:center;"><button type="button" class="btn btn-sm" hx-post="/api/v1/connection/qr" hx-target="#cd-qr-slot" hx-swap="innerHTML" hx-indicator="#cd-qr-spin">{{template "icon-search"}}Get QR code</button><span id="cd-qr-spin" class="muted htmx-indicator">generating…</span></div>
+    <p class="muted" style="font-size:0.78rem; text-align:center; margin-top:.5rem;">WhatsApp → Linked devices → Link a device · Expires in ~2 minutes</p>
+  </div>
+  <div id="cd-panel-pair" role="tabpanel" aria-labelledby="cd-tab-pair" tabindex="0" hidden>
+    <div class="form-row"><label class="label" for="cd-pair-phone">Phone (E.164)</label>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <input id="cd-pair-phone" class="input" name="phone" inputmode="tel" autocomplete="tel" placeholder="+15551234567" style="flex:1; min-width:0;" />
+        <button type="button" class="btn btn-secondary btn-sm" hx-post="/api/v1/connection/pair" hx-include="#cd-pair-phone" hx-target="#cd-pair-slot" hx-swap="innerHTML" hx-indicator="#cd-pair-spin" style="flex-shrink:0; align-self:stretch; height:auto;">{{template "icon-msg"}}Request code</button>
+      </div>
+      <span id="cd-pair-spin" class="muted htmx-indicator" style="font-size:0.78rem;">requesting…</span>
+    </div>
+    <div id="cd-pair-slot" class="slot" role="status" aria-live="polite" aria-atomic="true" style="margin-top:.75rem; min-height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.5rem; text-align:center;"><em class="muted">Code will appear here.</em></div>
+    <p class="muted" style="font-size:0.78rem; margin-top:.5rem;">Enter the 8-character code under Linked devices → Link with phone number.</p>
+  </div>
+  <div style="display:flex; gap:0.5rem; justify-content:space-between; align-items:center; margin-top:0.25rem;">
+    <button type="button" class="btn btn-ghost btn-sm" onclick="htmx.trigger('#connect-dialog-live','refresh')">Linked already? Refresh</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Close</button>
+  </div>
+  <script>(function(){
+    var list=document.getElementById('cd-tablist')||document.querySelector('.cd-tablist');
+    if(!list) return;
+    var tabs=[].slice.call(list.querySelectorAll('[data-cd-tab]'));
+    function select(name, focus){
+      tabs.forEach(function(t){
+        var on=t.getAttribute('data-cd-tab')===name;
+        t.setAttribute('aria-selected', on?'true':'false');
+        t.setAttribute('tabindex', on?'0':'-1');
+        var p=document.getElementById('cd-panel-'+t.getAttribute('data-cd-tab'));
+        if(p){ if(on) p.removeAttribute('hidden'); else p.setAttribute('hidden',''); }
+        if(on && focus) t.focus();
+      });
+    }
+    tabs.forEach(function(t){
+      t.addEventListener('click',function(){ select(t.getAttribute('data-cd-tab'), false); });
+    });
+    list.addEventListener('keydown',function(e){
+      var idx=tabs.indexOf(document.activeElement); if(idx<0) return; var next=-1;
+      if(e.key==='ArrowRight'||e.key==='ArrowDown') next=(idx+1)%tabs.length;
+      else if(e.key==='ArrowLeft'||e.key==='ArrowUp') next=(idx-1+tabs.length)%tabs.length;
+      else if(e.key==='Home') next=0; else if(e.key==='End') next=tabs.length-1; else return;
+      e.preventDefault(); select(tabs[next].getAttribute('data-cd-tab'), true);
+    });
+  })();</script>
+  {{end}}
+</div>

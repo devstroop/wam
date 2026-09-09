@@ -1,0 +1,8 @@
+{{range .Groups}}<tr id="group-{{.ID}}">
+  <td><span class="font-medium">{{.Name}}</span></td>
+  <td><span class="badge badge-secondary">{{.ContactCount}} contacts</span></td>
+  <td style="text-align:right; display:flex; gap:0.25rem; justify-content:flex-end">
+    <button class="btn btn-ghost btn-xs" data-id="{{.ID}}" data-name="{{.Name}}" onclick="openEditGroup(this)" title="Edit">Edit</button>
+    <button class="btn btn-ghost btn-xs" hx-delete="/api/v1/groups/{{.ID}}" hx-confirm="Delete group &quot;{{.Name}}&quot;? Members are kept." hx-swap="none" hx-on::after:request="if(ctx.response.status<400){window.__groupsDirty=true;htmx.trigger('#groups-drawer-rows','refresh');}" title="Delete">Delete</button>
+  </td>
+</tr>{{else}}<tr><td colspan="3"><em class="muted">No groups yet — create one to segment your contacts.</em></td></tr>{{end}}

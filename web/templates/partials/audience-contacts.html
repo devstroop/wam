@@ -1,0 +1,9 @@
+{{range .Contacts}}<label style="display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.75rem; border-radius:calc(var(--radius) - 2px); cursor:pointer;">
+  <input type="checkbox" name="contact_ids" value="{{.ID}}" class="cc-contact" />
+  <span style="flex:1;">
+    <span class="font-medium">{{if .Name}}{{.Name}}{{else}}{{.Phone}}{{end}}</span>
+    <span class="muted" style="font-size:0.8125rem; margin-left:0.5rem;">{{.Phone}}{{if .Name}}{{else}} · No name{{end}}</span>
+  </span>
+  {{range .Groups}}<span class="badge badge-secondary" style="font-size:0.7rem;">{{.Name}}</span>{{end}}
+</label>{{else}}<div class="muted" style="padding:0.75rem; text-align:center;"><em>No contacts found. Try a different search or <a href="/contacts">create contacts</a>.</em></div>{{end}}
+{{if .NextCursor}}<button class="btn btn-ghost btn-xs" style="margin-top:0.5rem; width:100%;" hx-get="/partials/audience-contacts?q={{.Q}}&cursor={{.NextCursor}}" hx-target="closest div" hx-swap="innerHTML">Load more</button>{{end}}

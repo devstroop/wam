@@ -1,0 +1,13 @@
+{{range .Campaigns}}<tr id="campaign-{{.ID}}">
+  <td><a href="/campaigns/{{.ID}}">{{.Name}}</a></td>
+  <td>{{if eq .Status "sending"}}<span class="badge badge-success">{{title .Status}}</span>{{else if eq .Status "done"}}<span class="badge badge-success">{{title .Status}}</span>{{else if or (eq .Status "paused") (eq .Status "scheduled")}}<span class="badge badge-warning">{{title .Status}}</span>{{else if eq .Status "cancelled"}}<span class="badge badge-destructive">{{title .Status}}</span>{{else}}<span class="badge badge-secondary">{{title .Status}}</span>{{end}}</td>
+  <td class="muted">{{.Total}} contacts</td>
+  <td class="muted">{{.Sent}} sent · {{.Failed}} failed · {{.Queued}} queued</td>
+  <td style="text-align:right;">
+    {{if or (eq .Status "draft") (eq .Status "scheduled")}}<button class="btn btn-ghost btn-xs" data-id="{{.ID}}" data-name="{{.Name}}" data-body="{{.BodyTemplate}}" onclick="openEditCampaign(this)">Edit</button>{{end}}
+    <a class="btn btn-ghost btn-xs" href="/campaigns/{{.ID}}">View</a>
+    <button class="btn btn-ghost btn-xs" hx-delete="/api/v1/campaigns/{{.ID}}" hx-confirm="Delete campaign &quot;{{.Name}}&quot;? Recipient history goes with it." hx-swap="none" title="Delete">Delete</button>
+  </td>
+</tr>{{else}}<tr>
+  <td colspan="5"><em class="muted">No campaigns yet — create one to start broadcasting.</em></td>
+</tr>{{end}}

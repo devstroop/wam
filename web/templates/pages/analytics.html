@@ -1,0 +1,70 @@
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Analytics</h1>
+    <p>Sent → delivered → read per campaign, 14-day timeline.</p>
+  </div>
+</div>
+<div class="grid-3">
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">Contacts / Campaigns</p><span class="stat-icon">{{template "icon-users"}}</span>
+      </div>
+      <p class="stat">{{.Overview.Contacts}} / {{.Overview.Campaigns}}</p>
+      <p class="stat-sub">{{.Overview.Groups}} groups · {{.Overview.Sent7d}} sends (7d)</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">Delivery rate</p><span class="stat-icon">{{template "icon-check"}}</span>
+      </div>
+      <p class="stat">{{.DeliveryPct}}</p>
+      <p class="stat-sub">{{.Overview.Funnel.Delivered}} delivered of {{.SentTotal}} sent</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body stat-card">
+      <div class="stat-top">
+        <p class="stat-label">Read rate</p><span class="stat-icon">{{template "icon-chart"}}</span>
+      </div>
+      <p class="stat">{{.ReadPct}}</p>
+      <p class="stat-sub">{{.Overview.Funnel.Read}} read · {{.Overview.Funnel.Failed}} failed</p>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Last 14 days</p>
+  </div>
+  <div class="card-body" id="analytics-slot" hx-get="/partials/analytics-chart" hx-trigger="load" hx-swap="innerHTML">
+    <em class="muted">loading…</em>
+  </div>
+</div>
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Campaigns</p>
+    <p class="card-desc">Per-campaign funnel with CSV export.</p>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="table-wrap" style="border:0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Funnel</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody hx-get="/partials/analytics-rows" hx-trigger="load" hx-swap="innerHTML">
+          <tr>
+            <td colspan="4"><em class="muted">loading…</em></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{{end}}
