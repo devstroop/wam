@@ -1,0 +1,171 @@
+{{/* dashboard shell — defines "app". Pages define "content". Icons from shared/icons.html. */}}
+{{define "app"}}<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{with .Title}}{{.}} · {{end}}{{.AppName}} — {{.AppTagline}}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2316a34a'/%3E%3Cpath d='M7.9 20A9 9 0 1 0 4 16.1L2 22Z' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+<link rel="stylesheet" href="/static/css/tokens.css" />
+<link rel="stylesheet" href="/static/css/components.css" />
+<link rel="stylesheet" href="/static/css/app.css" />
+<script>(function(){try{var t=localStorage.getItem('wam:theme');if(t==='light'){document.documentElement.classList.remove('dark');}else if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style type="text/tailwindcss">
+  @theme {
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-card: hsl(var(--card));
+    --color-card-foreground: hsl(var(--card-foreground));
+    --color-popover: hsl(var(--popover));
+    --color-popover-foreground: hsl(var(--popover-foreground));
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-secondary-foreground: hsl(var(--secondary-foreground));
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+    --color-accent: hsl(var(--accent));
+    --color-accent-foreground: hsl(var(--accent-foreground));
+    --color-destructive: hsl(var(--destructive));
+    --color-destructive-foreground: hsl(var(--destructive-foreground));
+    --color-border: hsl(var(--border));
+    --color-input: hsl(var(--input));
+    --color-ring: hsl(var(--ring));
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@{{.HTMXVersion}}/dist/htmx.min.js" defer></script>
+<script src="/static/js/app.js" defer></script>
+</head>
+<body hx-boost="true">
+<div data-slot="sidebar-layout" class="relative grid w-full grid-cols-1 [--sidebar-h:100svh] [min-height:var(--sidebar-h)] sm:grid-cols-[minmax(var(--sidebar-w,16rem),20rem)_minmax(0,1fr)]">
+  <nav id="wam-sidebar" data-slot="sidebar" tabindex="-1" aria-label="Main" class="flex h-[var(--sidebar-h,100svh)] flex-col gap-2 border-r bg-card text-card-foreground max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:h-[100dvh] max-sm:w-72 max-sm:max-w-[85vw] max-sm:shadow-lg sm:sticky sm:top-0">
+    <div data-slot="sidebar-header" class="flex items-center gap-2 px-4 pt-4 pb-2">
+      <a class="brand-row" href="/dashboard" style="margin-bottom:0">
+        <span class="brand-mark" style="width:1.75rem;height:1.75rem">{{template "icon-whatsapp"}}</span>
+        <span class="brand-text"><span class="brand-name">{{.AppName}}</span><span class="brand-sub">{{.AppTagline}}</span></span>
+      </a>
+    </div>
+    <div data-slot="sidebar-body" class="flex-1 overflow-y-auto px-2 py-2">
+      <div id="sidebar-conn" hx-get="/partials/sidebar-connection" hx-trigger="load, every 15s" hx-swap="innerHTML"><em class="muted" style="font-size:0.75rem;">…</em></div>
+      <div data-slot="sidebar-group" class="pt-1 pb-2">
+        <!-- <div data-slot="sidebar-group-label" class="sidebar-group-label px-3 py-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase">Workspace</div> -->
+        <a href="/dashboard" data-slot="sidebar-item" {{if eq .Nav "dashboard"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-dashboard"}}<span class="sidebar-text">Dashboard</span></a>
+        <a href="/analytics" data-slot="sidebar-item" {{if eq .Nav "analytics"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-chart"}}<span class="sidebar-text">Analytics</span></a>
+        <a href="/contacts" data-slot="sidebar-item" {{if eq .Nav "contacts"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-users"}}<span class="sidebar-text">Contacts</span></a>
+        <a href="/templates" data-slot="sidebar-item" {{if eq .Nav "templates"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-file"}}<span class="sidebar-text">Templates</span></a>
+        <a href="/campaigns" data-slot="sidebar-item" {{if eq .Nav "campaigns"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-mega"}}<span class="sidebar-text">Campaigns</span></a>
+      </div>
+    </div>
+    <div data-slot="sidebar-footer" class="mt-auto border-t px-2 py-2 text-sm flex flex-col gap-2">
+      <div data-slot="sidebar-group" class="py-0">
+        {{if .IsDev}}<a href="/api-docs/" target="_blank" rel="noopener" data-slot="sidebar-item" class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">{{template "icon-book"}}<span class="sidebar-text">API Docs</span></a>{{end}}
+        <a href="/settings" data-slot="sidebar-item" {{if eq .Nav "settings"}}aria-current="page"{{end}} class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground aria-[current=page]:hover:bg-primary">{{template "icon-settings"}}<span class="sidebar-text">Settings</span></a>
+      </div>
+    </div>
+  </nav>
+  <button data-slot="sidebar-scrim" data-sidebar-scrim-for="wam-sidebar" aria-label="Close navigation" tabindex="-1" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm hidden"></button>
+  <main data-slot="sidebar-content" class="min-w-0 flex-1">
+    <header class="topbar-app">
+      <button id="sidebar-toggle" type="button" aria-label="Toggle sidebar" aria-expanded="true" aria-controls="wam-sidebar" class="inline-flex size-8 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4" aria-hidden="true"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+      </button>
+      <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem;">
+        <button id="theme-toggle" type="button" class="theme-btn" aria-label="Toggle theme" title="Toggle theme"><span class="theme-icon-sun">{{template "icon-sun"}}</span><span class="theme-icon-moon">{{template "icon-moon"}}</span></button>
+        <div class="avatar-wrap">
+          <button id="avatar-btn" type="button" class="avatar-btn" aria-label="Account" aria-haspopup="menu" aria-expanded="false" aria-controls="avatar-menu">A</button>
+          <div id="avatar-menu" class="avatar-menu" role="menu" hidden>
+            <div class="avatar-menu-head"><span class="avatar-menu-title">Admin</span><span class="badge badge-muted">{{title .Env}}</span></div>
+            <a href="/logout" role="menuitem" class="avatar-menu-item">{{template "icon-out"}}Sign Out</a>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div id="content" class="page">
+      {{template "content" .}}
+    </div>
+  </main>
+</div>
+<dialog id="connect-dialog" class="modal">
+  <div id="connect-dialog-live" hx-get="/partials/connect-dialog" hx-trigger="load, refresh" hx-swap="innerHTML"><em class="muted">Loading…</em></div>
+</dialog>
+<div id="toasts" aria-live="polite"></div>
+<script>
+function openConnectDialog(){
+  var d=document.getElementById('connect-dialog');
+  if(!d || typeof d.showModal !== 'function'){ location.href='/connect'; return; }
+  var live=document.getElementById('connect-dialog-live');
+  if(window.htmx && live) htmx.trigger(live,'refresh');
+  d.showModal();
+}
+(function(){
+  var d=document.getElementById('connect-dialog');
+  if(!d) return;
+  d.addEventListener('click',function(e){ if(e.target===d) d.close(); });
+})();
+</script>
+<script>
+(function(){
+  var layout=document.querySelector('[data-slot="sidebar-layout"]');
+  var sidebar=document.getElementById('wam-sidebar');
+  var btn=document.getElementById('sidebar-toggle');
+  var scrim=document.querySelector('[data-slot="sidebar-scrim"]');
+  if(!layout||!sidebar||!btn)return;
+  var isMobile=function(){return window.matchMedia('(max-width: 639px)').matches;};
+  // restore desktop collapsed state
+  try{ if(localStorage.getItem('wam:sidebar-collapsed')==='1' && !isMobile()) layout.classList.add('is-collapsed'); }catch(e){}
+  function syncAria(){
+    var collapsed=layout.classList.contains('is-collapsed');
+    var open=sidebar.classList.contains('is-open');
+    btn.setAttribute('aria-expanded', isMobile() ? (open?'true':'false') : (!collapsed?'true':'false'));
+  }
+  function openMobile(){ sidebar.classList.add('is-open'); scrim.classList.remove('hidden'); scrim.classList.add('is-open'); document.body.style.overflow='hidden'; syncAria(); }
+  function closeMobile(){ sidebar.classList.remove('is-open'); scrim.classList.remove('is-open'); scrim.classList.add('hidden'); document.body.style.overflow=''; syncAria(); }
+  btn.addEventListener('click',function(){
+    if(isMobile()){
+      if(sidebar.classList.contains('is-open')) closeMobile(); else openMobile();
+    } else {
+      layout.classList.toggle('is-collapsed');
+      try{ localStorage.setItem('wam:sidebar-collapsed', layout.classList.contains('is-collapsed') ? '1' : '0'); }catch(e){}
+      syncAria();
+    }
+  });
+  if(scrim) scrim.addEventListener('click', closeMobile);
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape' && sidebar.classList.contains('is-open')){ closeMobile(); btn.focus(); }
+  });
+  window.addEventListener('resize', syncAria);
+  syncAria();
+})();
+(function(){
+  var abtn=document.getElementById('avatar-btn');
+  var menu=document.getElementById('avatar-menu');
+  if(!abtn||!menu) return;
+  function close(){ menu.hidden=true; abtn.setAttribute('aria-expanded','false'); }
+  function open(){ menu.hidden=false; abtn.setAttribute('aria-expanded','true'); }
+  abtn.addEventListener('click',function(e){
+    e.stopPropagation();
+    if(menu.hidden) open(); else close();
+  });
+  document.addEventListener('click',function(e){
+    if(!menu.hidden && !e.target.closest('.avatar-wrap')) close();
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape' && !menu.hidden){ close(); abtn.focus(); }
+  });
+})();
+(function(){
+  var tbtn=document.getElementById('theme-toggle');
+  if(!tbtn) return;
+  tbtn.addEventListener('click',function(){
+    var el=document.documentElement;
+    var dark=el.classList.toggle('dark');
+    try{ localStorage.setItem('wam:theme', dark ? 'dark' : 'light'); }catch(e){}
+  });
+})();
+</script>
+</body>
+</html>{{end}}

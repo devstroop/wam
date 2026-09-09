@@ -1,0 +1,125 @@
+{{/*
+  Button template — shadcn-htmx, htmx v4 + Tailwind v4.
+  Mirrors registry/ui/button.tsx for Go projects using html/template.
+
+  Usage in your code:
+
+      type ButtonArgs struct {
+          Label    string
+          Variant  string // default | destructive | outline | secondary | ghost | link
+          Size     string // default | xs | sm | lg | icon | icon-xs | icon-sm | icon-lg
+          Type     string // button | submit | reset
+          Disabled bool
+          // AriaDisabled keeps the button focusable while its action is
+          // unavailable (unlike Disabled, which drops it from the a11y tree).
+          AriaDisabled bool
+          // Pressed is the aria-pressed toggle state. Use a *bool for true/false,
+          // or set PressedMixed=true for the tri-state "mixed" value.
+          // aria-pressed is tri-state: true | false | "mixed".
+          Pressed      *bool
+          PressedMixed bool
+
+          // ARIA
+          AriaLabel       string
+          AriaLabelledby  string
+          AriaDescribedby string
+          // Disclosure / menu trigger contract.
+          AriaExpanded     *bool
+          AriaHaspopup     string // true | menu | listbox | tree | grid | dialog
+          AriaControls     string
+
+          // Standard <button> form attributes — useful for multi-submit forms.
+          ID             string
+          Name           string
+          Value          string
+          Form           string
+          FormAction     string
+          FormEnctype    string // application/x-www-form-urlencoded | multipart/form-data | text/plain
+          FormMethod     string // get | post | dialog
+          FormNoValidate bool
+          FormTarget     string
+          PopoverTarget  string
+          PopoverTargetAction string // show | hide | toggle
+
+          // Everything else (hx-post, hx-target, hx-swap, …) goes here.
+          Attrs map[string]string
+      }
+
+      // Once at startup:
+      tpl := template.Must(template.New("").ParseFiles("components/button.tmpl"))
+
+      // Then per-render:
+      tpl.ExecuteTemplate(w, "button", ButtonArgs{
+          Label: "Save", Variant: "default",
+          Attrs: map[string]string{"hx-post": "/save"},
+      })
+
+  The template emits a native <button>, so role and Space/Enter activation
+  come for free. See repos/aria-practices/content/patterns/button/.
+*/}}
+
+{{define "button"}}
+{{- $variants := dict
+    "default" "bg-primary text-primary-foreground hover:bg-primary/90"
+    "destructive" "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40"
+    "outline" "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50"
+    "secondary" "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+    "ghost" "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
+    "link" "text-primary underline-offset-4 hover:underline" -}}
+{{- $sizes := dict
+    "default" "h-9 px-4 py-2 has-[>svg]:px-3"
+    "xs" "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3"
+    "sm" "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5"
+    "lg" "h-10 rounded-md px-6 has-[>svg]:px-4"
+    "icon" "size-9"
+    "icon-xs" "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3"
+    "icon-sm" "size-8"
+    "icon-lg" "size-10" -}}
+{{- $variant := or .Variant "default" -}}
+{{- $size := or .Size "default" -}}
+{{- $type := or .Type "button" -}}
+{{- $base := "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&.htmx-request]:pointer-events-none [&.htmx-request]:opacity-70" -}}
+<button type="{{$type}}"
+        class="{{$base}} {{index $variants $variant}} {{index $sizes $size}}"
+        {{- if .ID}} id="{{.ID}}"{{end}}
+        {{- if .Name}} name="{{.Name}}"{{end}}
+        {{- if .Value}} value="{{.Value}}"{{end}}
+        {{- if .Form}} form="{{.Form}}"{{end}}
+        {{- if .FormAction}} formaction="{{.FormAction}}"{{end}}
+        {{- if .FormEnctype}} formenctype="{{.FormEnctype}}"{{end}}
+        {{- if .FormMethod}} formmethod="{{.FormMethod}}"{{end}}
+        {{- if .FormNoValidate}} formnovalidate{{end}}
+        {{- if .FormTarget}} formtarget="{{.FormTarget}}"{{end}}
+        {{- if .PopoverTarget}} popovertarget="{{.PopoverTarget}}"{{end}}
+        {{- if .PopoverTargetAction}} popovertargetaction="{{.PopoverTargetAction}}"{{end}}
+        {{- if .Disabled}} disabled{{end}}
+        {{/* aria-disabled stays focusable while unavailable, unlike disabled.
+             See repos/aria-practices/content/patterns/button/button-pattern.html */}}
+        {{- if .AriaDisabled}} aria-disabled="true"{{end}}
+        {{/* aria-pressed is tri-state: true | false | "mixed". See
+             repos/mdn/files/en-us/web/accessibility/aria/reference/attributes/aria-pressed/ */}}
+        {{- if .PressedMixed}} aria-pressed="mixed"
+        {{- else if .Pressed}} aria-pressed="{{if deref .Pressed}}true{{else}}false{{end}}"{{end}}
+        {{- if .AriaLabel}} aria-label="{{.AriaLabel}}"{{end}}
+        {{- if .AriaLabelledby}} aria-labelledby="{{.AriaLabelledby}}"{{end}}
+        {{- if .AriaDescribedby}} aria-describedby="{{.AriaDescribedby}}"{{end}}
+        {{/* Disclosure / menu trigger contract. See
+             repos/mdn/files/en-us/web/accessibility/aria/reference/attributes/aria-expanded/
+             and .../aria-haspopup/ */}}
+        {{- if .AriaExpanded}} aria-expanded="{{if deref .AriaExpanded}}true{{else}}false{{end}}"{{end}}
+        {{- if .AriaHaspopup}} aria-haspopup="{{.AriaHaspopup}}"{{end}}
+        {{- if .AriaControls}} aria-controls="{{.AriaControls}}"{{end}}
+        data-slot="button" data-variant="{{$variant}}" data-size="{{$size}}"
+        {{- range $k, $v := .Attrs}} {{$k}}="{{$v}}"{{end -}}
+>{{.Label}}</button>
+{{end}}
+
+{{/*
+  Note: this template uses sprig's `dict` and `deref` helpers. If you don't
+  use sprig, hard-code the lookup or pass the class string from Go code:
+
+      args.Class = computeButtonClass(args.Variant, args.Size)
+
+  and reference {{.Class}} directly in the template.
+*/}}
+
