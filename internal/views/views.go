@@ -41,7 +41,8 @@ func funcMap() template.FuncMap {
 			return v
 		},
 		"htmlSafe": func(s string) template.HTML { return template.HTML(s) },
-		"title": func(s string) string {
+		"title": func(v any) string {
+			s, _ := v.(string)
 			if s == "" {
 				return s
 			}
