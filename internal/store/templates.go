@@ -37,9 +37,16 @@ func (db *DB) CreateTemplate(name, body, category, language string) (*Template, 
 		language = "en"
 	}
 	t := &Template{ID: uuid.NewString(), Name: name, Body: body, Category: category, Language: language}
-	if _, err := db.Exec(`INSERT INTO templates (id, name, category, language, body) VALUES (?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.Category, t.Language, t.Body); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+	var err error
+	if db.IsPostgres() {
+		_, err = db.Exec(`INSERT INTO templates (id, name, category, language, body, org_id) VALUES (?, ?, ?, ?, ?, ?)`,
+			t.ID, t.Name, t.Category, t.Language, t.Body, db.orgOr(DefaultOrgID))
+	} else {
+		_, err = db.Exec(`INSERT INTO templates (id, name, category, language, body) VALUES (?, ?, ?, ?, ?)`,
+			t.ID, t.Name, t.Category, t.Language, t.Body)
+	}
+	if err != nil {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("template name already exists")
 		}
 		return nil, err
@@ -92,7 +99,7 @@ func (db *DB) UpdateTemplate(id, name, body string) (*Template, error) {
 		cur.Body = strings.TrimSpace(body)
 	}
 	if _, err := db.Exec(`UPDATE templates SET name = ?, body = ? WHERE id = ?`, cur.Name, cur.Body, id); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("template name already exists")
 		}
 		return nil, err

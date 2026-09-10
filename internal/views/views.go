@@ -92,7 +92,7 @@ func New(shared map[string]any) (*Views, error) {
 	}
 
 	base := template.New("").Funcs(funcMap())
-	publicPages := []string{"index.html", "login.html"}
+	publicPages := []string{"index.html", "login.html", "signup.html", "verify.html", "forgot.html", "reset.html", "invite-accept.html"}
 	for _, p := range publicPages {
 		tmpl, err := template.Must(base.Clone()).ParseFS(webassets.TemplatesFS,
 			"templates/shared/icons.html",

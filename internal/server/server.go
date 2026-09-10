@@ -31,7 +31,9 @@ import (
 	"github.com/devstroop/wam/internal/campaigns"
 	"github.com/devstroop/wam/internal/config"
 	"github.com/devstroop/wam/internal/handlers"
+	"github.com/devstroop/wam/internal/mail"
 	"github.com/devstroop/wam/internal/middleware"
+	"github.com/devstroop/wam/internal/notify"
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/views"
 	"github.com/devstroop/wam/internal/wa"
@@ -39,17 +41,27 @@ import (
 )
 
 // New builds the *http.Server with all routes and middleware.
-// It opens SQLite (creating DataDir), panicking on fatal errors like the
-// existing views/static setup.
+// It opens the store (Postgres when WAM_DATABASE_URL is set, else SQLite),
+// creating DataDir, panicking on fatal errors like the existing
+// views/static setup.
 func New(cfg config.Config, log *slog.Logger) *http.Server {
 	if cfg.DataDir != "" {
 		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 			panic("datadir: " + err.Error())
 		}
 	}
-	db, err := store.Open(cfg.DBPath)
+	db, ownerDB, err := store.OpenAuto(cfg.DBPath, cfg.DatabaseURL, cfg.AppDatabaseURL)
 	if err != nil {
+		if cfg.UsesPostgres() && cfg.AppDatabaseURL != "" {
+			panic("store: run wam migrate-schema with the owner DSN first: " + err.Error())
+		}
 		panic("store: " + err.Error())
+	}
+	// Postgres boots the UMS stack (DB users + RBAC). If no users exist and
+	// an admin password is configured, seed the first admin so single-env
+	// bootstrap keeps working (email via WAM_ADMIN_EMAIL).
+	if cfg.UsesPostgres() {
+		seedAdmin(ownerDB, cfg, log)
 	}
 	sess := auth.New(cfg.AdminPassword, cfg.SessionSecret)
 	const htmxVersion = "4.0.0"
@@ -67,12 +79,22 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	if err != nil {
 		panic("views: " + err.Error())
 	}
-	wasvc := wa.New(cfg.DBPath, log)
-	go wasvc.AutoConnect()
+	wasvc := wa.NewManager(cfg.DBPath, cfg.WAURL(), !cfg.UsesPostgres(), log)
+	if cfg.UsesPostgres() {
+		// Pairing callbacks persist device/account state; legacy sessions
+		// upgrade into a default account row on first boot after migration.
+		wasvc.OnPaired = func(accountID, jid string) {
+			persistPairedDevice(db, accountID, jid, log)
+		}
+		ensureLegacyAccount(ownerDB, wasvc, log)
+		go wasvc.AutoConnect(connectEntries(ownerDB, log))
+	} else {
+		go wasvc.AutoConnect(nil)
+	}
 	web := &handlers.Web{Views: v, Store: db, WA: wasvc}
 	authH := &handlers.Auth{Session: sess, Login: v.RenderPage}
-	conn := &handlers.Connection{WA: wasvc, Views: v}
-	msg := &handlers.Messaging{WA: wasvc}
+	conn := &handlers.Connection{WA: wasvc, Views: v, Store: db}
+	msg := &handlers.Messaging{WA: wasvc, Store: db}
 	contacts := &handlers.Contacts{Store: db, Views: v}
 	groups := &handlers.Groups{Store: db, Views: v}
 	tmpls := &handlers.Templates{Store: db, Views: v}
@@ -80,11 +102,29 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	analytics := &handlers.Analytics{Store: db, Views: v}
 
 	// Sender worker (single-flight). Started with the server; receipts flow
-	// back through wa.OnReceipt.
-	worker := campaigns.New(db, wasvc, log)
+	// back through wa.OnReceipt. The worker gets the owner handle for org
+	// enumeration plus the runtime handle: all tenant data access runs
+	// inside WithOrg on the runtime handle (fail-closed RLS).
+	notifyDisp := &notify.Dispatcher{Store: db, Log: log}
+	worker := campaigns.New(db, ownerDB, wasvc, notifyDisp, log)
+	wasvc.OnReceipt = worker.OnReceipt
 	worker.Start()
 
 	mux := http.NewServeMux()
+
+	// Abuse gates (in-memory token buckets; per-process).
+	limiter := middleware.NewLimiter()
+	limited := func(pattern string, h http.HandlerFunc, scope string, keyFn func(*http.Request) string, perMin, burst int) {
+		mux.Handle(pattern, middleware.RateLimit(limiter, scope, keyFn, perMin, burst)(h))
+	}
+	// Public auth endpoints: per-IP, tight (credential stuffing + enumeration).
+	ipAuth := func(pattern string, h http.HandlerFunc) {
+		limited(pattern, h, "auth", middleware.ClientIP, 12, 5)
+	}
+	// Pairing QR/pair generation is expensive: per-org, tight.
+	orgPair := func(pattern string, h http.HandlerFunc) {
+		limited(pattern, h, "pair", middleware.OrgKey, 6, 2)
+	}
 
 	// System.
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
@@ -105,10 +145,42 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 
 	// Web (htmx): public + dashboard shell.
 	mux.HandleFunc("GET /", web.Index)
-	mux.HandleFunc("GET /login", authH.LoginPage)
-	mux.HandleFunc("POST /login", authH.LoginSubmit)
-	mux.HandleFunc("POST /logout", authH.Logout)
-	mux.HandleFunc("GET /logout", authH.Logout)
+	if cfg.UsesPostgres() {
+		// UMS stack replaces single-admin auth (legacy kept for SQLite).
+		ums := &handlers.UMS{Store: db, Views: v, Session: sess, Mailer: mail.LogMailer{Log: log}, BaseURL: cfg.PublicBaseURL}
+		mux.HandleFunc("GET /login", ums.LoginPage)
+		ipAuth("POST /login", ums.LoginSubmit)
+		mux.HandleFunc("POST /logout", ums.LogoutSubmit)
+		mux.HandleFunc("GET /logout", ums.LogoutSubmit)
+		mux.HandleFunc("GET /signup", ums.SignupPage)
+		ipAuth("POST /signup", ums.SignupSubmit)
+		mux.HandleFunc("GET /verify", ums.VerifyPage)
+		mux.HandleFunc("GET /forgot", ums.ForgotPage)
+		ipAuth("POST /forgot", ums.ForgotSubmit)
+		mux.HandleFunc("GET /reset", ums.ResetPage)
+		ipAuth("POST /reset", ums.ResetSubmit)
+		mux.HandleFunc("GET /invite/accept", ums.InviteAcceptPage)
+		ipAuth("POST /invite/accept", ums.InviteAcceptSubmit)
+		mux.HandleFunc("GET /api/v1/auth/me", ums.Me)
+		mux.HandleFunc("POST /api/v1/auth/switch", ums.SwitchSubmit)
+		mux.HandleFunc("GET /api/v1/members", ums.ListMembers)
+		mux.HandleFunc("POST /api/v1/members/invite", ums.InviteMember)
+		mux.HandleFunc("PATCH /api/v1/members/{user_id}", ums.UpdateMemberRole)
+		mux.HandleFunc("DELETE /api/v1/members/{user_id}", ums.RemoveMember)
+		mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
+		mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
+		mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
+		billing := &handlers.Billing{Store: db}
+		mux.HandleFunc("GET /api/v1/billing/plan", billing.Overview)
+		mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
+		mux.HandleFunc("POST /api/v1/billing/subscription", billing.SetSubscription)
+		mux.HandleFunc("GET /api/v1/billing/invoices", billing.Invoices)
+	} else {
+		mux.HandleFunc("GET /login", authH.LoginPage)
+		ipAuth("POST /login", authH.LoginSubmit)
+		mux.HandleFunc("POST /logout", authH.Logout)
+		mux.HandleFunc("GET /logout", authH.Logout)
+	}
 	mux.HandleFunc("GET /dashboard", web.Dashboard)
 	mux.HandleFunc("GET /connect", web.Connect)
 	mux.HandleFunc("GET /contacts", web.Contacts)
@@ -136,9 +208,19 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 
 	// API v1.
 	mux.HandleFunc("GET /api/v1/connection", conn.Status)
-	mux.HandleFunc("POST /api/v1/connection/qr", conn.QR)
-	mux.HandleFunc("POST /api/v1/connection/pair", conn.Pair)
+	orgPair("POST /api/v1/connection/qr", conn.QR)
+	orgPair("POST /api/v1/connection/pair", conn.Pair)
 	mux.HandleFunc("POST /api/v1/connection/logout", conn.Logout)
+	// WhatsApp accounts (multi-account; no-ops on legacy SQLite).
+	accts := &handlers.Accounts{Store: db, Mgr: wasvc}
+	mux.HandleFunc("GET /api/v1/accounts", accts.List)
+	mux.HandleFunc("POST /api/v1/accounts", accts.Create)
+	mux.HandleFunc("GET /api/v1/accounts/{id}", accts.Get)
+	mux.HandleFunc("PATCH /api/v1/accounts/{id}", accts.UpdateLabel)
+	mux.HandleFunc("DELETE /api/v1/accounts/{id}", accts.Delete)
+	orgPair("POST /api/v1/accounts/{id}/qr", accts.QR)
+	orgPair("POST /api/v1/accounts/{id}/pair", accts.Pair)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/logout", accts.Logout)
 	// Contacts + groups/labels (live SQLite).
 	mux.HandleFunc("GET /api/v1/contacts", contacts.List)
 	mux.HandleFunc("POST /api/v1/contacts", contacts.Create)
@@ -176,7 +258,20 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	mux.HandleFunc("GET /api/v1/campaigns/{id}/export", analytics.Export)
 	mux.HandleFunc("GET /partials/analytics-rows", analytics.Rows)
 	mux.HandleFunc("GET /partials/analytics-chart", analytics.Chart)
-	mux.HandleFunc("POST /api/v1/messages/send", msg.Send)
+	limited("POST /api/v1/messages/send", msg.Send, "send", middleware.OrgKey, 60, 10)
+
+	// Ops: metrics always; keys/webhooks/audit need the PG stack.
+	ops := &handlers.Ops{Store: db, WA: wasvc}
+	mux.HandleFunc("GET /metrics", ops.Metrics)
+	if cfg.UsesPostgres() {
+		mux.HandleFunc("GET /api/v1/audit", ops.AuditList)
+		mux.HandleFunc("GET /api/v1/keys", ops.ListKeys)
+		mux.HandleFunc("POST /api/v1/keys", ops.CreateKey)
+		mux.HandleFunc("DELETE /api/v1/keys/{id}", ops.RevokeKey)
+		mux.HandleFunc("GET /api/v1/webhooks", ops.ListEndpoints)
+		mux.HandleFunc("POST /api/v1/webhooks", ops.CreateEndpoint)
+		mux.HandleFunc("DELETE /api/v1/webhooks/{id}", ops.DeleteEndpoint)
+	}
 
 	// Static assets (embedded web/static).
 	staticFS, err := fs.Sub(webassets.StaticFS, "static")
@@ -186,7 +281,11 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	var h http.Handler = mux
-	h = sess.RequireAdmin(h)
+	if cfg.UsesPostgres() {
+		h = sess.RequireUMS(db, log)(h)
+	} else {
+		h = sess.RequireAdmin(h)
+	}
 	h = middleware.SecurityHeaders(h)
 	h = middleware.CORS(h)
 	h = middleware.RequestID(h)

@@ -49,4 +49,18 @@
     <a class="btn btn-outline btn-sm" href="/templates">{{template "icon-file"}}{{.Templates}} Templates</a>
   </div>
 </div>
+
+{{if .Billing}}
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Plan &amp; usage</p>
+    <p class="card-desc">{{.Billing.PlanName}} plan · renews monthly.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.875rem;">
+    {{range .Billing.Rows}}
+    <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">{{.Label}}</span><span>{{.Used}} / {{.Limit}}</span></div>
+    {{end}}
+  </div>
+</div>
+{{end}}
 {{end}}

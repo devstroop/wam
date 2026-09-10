@@ -14,6 +14,11 @@ info:
       campaigns + worker, per-campaign funnel, account overview, CSV export.
     * Persistence: SQLite (`WAM_DB_PATH`), shared with whatsmeow sqlstore.
       Auth: single admin (`WAM_ADMIN_PASSWORD`), session cookie.
+    * SaaS path (Postgres `WAM_DATABASE_URL` + `WAM_APP_DATABASE_URL`):
+      DB users + RBAC (`admin`/`user`, permission checks per handler),
+      per-request org transactions (fail-closed RLS), per-account grants
+      (`/api/v1/grants`, enforced in multi-account), signup/verify/reset,
+      invites, multi-org sessions with switcher.
   contact:
     name: WAM
   license:
@@ -41,6 +46,16 @@ tags:
     description: Delivery funnels over campaign_recipients.
   - name: Messages
     description: Outbound messaging.
+  - name: Auth
+    description: SaaS identity (signup/login/verify/reset/switch). Replaces single-admin on the Postgres path.
+  - name: Members
+    description: Team + per-account grants (admin, members:manage).
+  - name: Accounts
+    description: WhatsApp numbers per org (pair independently; campaigns pin one).
+  - name: Billing
+    description: Plans, derived usage, subscriptions, invoices (PG SaaS path).
+  - name: Ops
+    description: API keys, outbound webhooks, audit trail, metrics.
 paths:
   /healthz:
     get:
@@ -693,6 +708,465 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
+  /signup:
+    post:
+      tags: [Auth]
+      operationId: signup
+      summary: Register (SaaS path; creates org or joins invite). JSON API or web form
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                password: { type: string, minLength: 8 }
+                invite: { type: string, description: Invite token from /invite/accept }
+      responses:
+        '201': { description: Created (verify email) }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in (requires verified email). JSON API or web form
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { description: OK (sets session cookie) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Email unverified }
+  /logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoke session. JSON API or web form
+      responses:
+        '200': { description: OK }
+  /forgot:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Request reset link (always 200, no enumeration). JSON API or web form
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200': { description: OK }
+  /reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Consume reset token, revoke all sessions. JSON API or web form
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: Identity + orgs + role
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Identity' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/switch:
+    post:
+      tags: [Auth]
+      operationId: switchOrg
+      summary: Move session to another member org
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [org_id]
+              properties:
+                org_id: { type: string }
+      responses:
+        '200': { description: OK }
+        '403': { description: Not a member }
+  /api/v1/members:
+    get:
+      tags: [Members]
+      operationId: listMembers
+      summary: Members + pending invites (admin)
+      responses:
+        '200': { description: OK }
+        '403': { description: Missing members:manage }
+  /api/v1/members/invite:
+    post:
+      tags: [Members]
+      operationId: inviteMember
+      summary: Invite by email + role (admin, mails link)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, user], default: user }
+      responses:
+        '201': { description: Invited }
+        '403': { description: Missing members:manage }
+  /api/v1/members/{user_id}:
+    patch:
+      tags: [Members]
+      operationId: setMemberRole
+      summary: Change role (last-admin guard → 409)
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [admin, user] }
+      responses:
+        '200': { description: OK }
+        '409': { description: Last admin }
+    delete:
+      tags: [Members]
+      operationId: removeMember
+      summary: Remove member + revoke org sessions (last-admin guard → 409)
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+        '409': { description: Last admin }
+  /api/v1/accounts:
+    get:
+      tags: [Accounts]
+      operationId: listAccounts
+      summary: Viewable accounts with live status
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Accounts]
+      operationId: createAccount
+      summary: Add a pending account row (pair next; needs accounts:pair)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string }
+      responses:
+        '201': { description: Created }
+        '403': { description: Missing accounts:pair }
+  /api/v1/accounts/{account_id}:
+    get:
+      tags: [Accounts]
+      operationId: getAccount
+      summary: One account (view access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Accounts]
+      operationId: renameAccount
+      summary: Rename (needs accounts:pair)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Accounts]
+      operationId: deleteAccount
+      summary: Remove row + device (needs accounts:pair)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+  /api/v1/accounts/{account_id}/qr:
+    post:
+      tags: [Accounts]
+      operationId: accountQR
+      summary: Pairing QR for one account (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/accounts/{account_id}/pair:
+    post:
+      tags: [Accounts]
+      operationId: accountPair
+      summary: Phone linking code for one account (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/accounts/{account_id}/logout:
+    post:
+      tags: [Accounts]
+      operationId: accountLogout
+      summary: Wipe one account device (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+  /api/v1/billing/plan:
+    get:
+      tags: [Billing]
+      operationId: getBillingPlan
+      summary: Effective plan + derived usage (+ subscription)
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/billing/plans:
+    get:
+      tags: [Billing]
+      operationId: listBillingPlans
+      summary: Tiers cheapest-first
+      responses:
+        '200': { description: OK }
+  /api/v1/billing/subscription:
+    post:
+      tags: [Billing]
+      operationId: setSubscription
+      summary: Switch tier as trial (admin, billing:manage; paid activation via gateway webhook)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_id]
+              properties:
+                plan_id: { type: string }
+      responses:
+        '200': { description: OK }
+        '403': { description: Missing billing:manage }
+  /api/v1/billing/invoices:
+    get:
+      tags: [Billing]
+      operationId: listInvoices
+      summary: Charges newest-first
+      responses:
+        '200': { description: OK }
+  /api/v1/grants:
+    get:
+      tags: [Members]
+      operationId: listGrants
+      summary: Account grants for a member (?user_id=, admin)
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Members]
+      operationId: setGrant
+      summary: Grant member access to an account (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, account_id, role]
+              properties:
+                user_id: { type: string }
+                account_id: { type: string }
+                role: { type: string, enum: [member, viewer] }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Members]
+      operationId: removeGrant
+      summary: Revoke account access (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, account_id]
+              properties:
+                user_id: { type: string }
+                account_id: { type: string }
+      responses:
+        '204': { description: Revoked }
+  /api/v1/audit:
+    get:
+      tags: [Ops]
+      operationId: listAudit
+      summary: Audit trail newest-first (admin)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/keys:
+    get:
+      tags: [Ops]
+      operationId: listKeys
+      summary: API keys, no secrets (admin, keys:manage)
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ops]
+      operationId: createKey
+      summary: Mint credential, raw token shown once (scopes narrow creator perms)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                name: { type: string }
+                scopes: { type: array, items: { type: string } }
+                expires_at: { type: string, format: date-time }
+      responses:
+        '201': { description: Created }
+  /api/v1/keys/{id}:
+    delete:
+      tags: [Ops]
+      operationId: revokeKey
+      summary: Revoke credential (row kept for audit)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Revoked }
+  /api/v1/webhooks:
+    get:
+      tags: [Ops]
+      operationId: listWebhooks
+      summary: Outbound targets, no secrets + event catalog
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ops]
+      operationId: createWebhook
+      summary: Register https target with event subset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                secret: { type: string, description: HMAC secret for X-Wam-Signature }
+                events:
+                  type: array
+                  items: { type: string, enum: [message.sent, message.delivered, message.read, message.failed, campaign.done] }
+      responses:
+        '201': { description: Created }
+  /api/v1/webhooks/{id}:
+    delete:
+      tags: [Ops]
+      operationId: deleteWebhook
+      summary: Remove target
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+  /metrics:
+    get:
+      tags: [Ops]
+      operationId: getMetrics
+      summary: Prometheus-text gauges (any member; scrape with API key)
+      responses:
+        '200': { description: OK }
 components:
   parameters:
     EntityId:
@@ -756,6 +1230,7 @@ components:
               items: { type: string, format: uuid }
         bodyTemplate: { type: string }
         scheduledAt: { type: string, format: date-time, nullable: true }
+        waAccountId: { type: string }
         createdAt: { type: string, format: date-time }
     CampaignCreate:
       type: object
@@ -771,6 +1246,18 @@ components:
           type: array
           items: { type: string, format: uuid }
         scheduledAt: { type: string, format: date-time, nullable: true }
+        wa_account_id: { type: string, description: 'Sender account; empty resolves to the sole account (400 when ambiguous)' }
+    Account:
+      type: object
+      required: [id, orgId, status]
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        label: { type: string }
+        phone: { type: string }
+        status: { type: string, enum: [pending, connected, disconnected, logged_out] }
+        lastSeenAt: { type: string }
+        createdAt: { type: string }
     CampaignPage:
       type: object
       required: [data]
@@ -897,6 +1384,44 @@ components:
         read: { type: integer }
         replied: { type: integer }
         failed: { type: integer }
+    Identity:
+      type: object
+      required: [id, email, orgId, role]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        orgId: { type: string }
+        role: { type: string, enum: [admin, user] }
+        orgs:
+          type: array
+          items:
+            type: object
+            required: [id, name, role]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string, enum: [admin, user] }
+    Membership:
+      type: object
+      required: [userId, orgId, role]
+      properties:
+        userId: { type: string }
+        orgId: { type: string }
+        role: { type: string, enum: [admin, user] }
+        userEmail: { type: string, format: email }
+        userName: { type: string }
+        createdAt: { type: string }
+    Grant:
+      type: object
+      required: [userId, accountId, orgId, role]
+      properties:
+        userId: { type: string }
+        accountId: { type: string }
+        orgId: { type: string }
+        role: { type: string, enum: [member, viewer] }
+        grantedBy: { type: string }
+        createdAt: { type: string }
   responses:
     BadRequest:
       description: Bad request
@@ -905,6 +1430,16 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     NotFound:
       description: Not found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Login required
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PaymentRequired:
+      description: Plan quota exceeded (upgrade)
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

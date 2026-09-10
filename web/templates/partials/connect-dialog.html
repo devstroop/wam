@@ -19,7 +19,7 @@
   </div>
   <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.25rem;">
     <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Close</button>
-    <button type="button" class="btn btn-outline btn-sm" hx-post="/api/v1/connection/logout" hx-swap="none" hx-confirm="Disconnect and wipe the WhatsApp session?">{{template "icon-out"}}Disconnect</button>
+    <button type="button" class="btn btn-outline btn-sm" hx-post="/api/v1/connection/logout{{if .AccountID}}?account={{.AccountID}}{{end}}" hx-swap="none" hx-confirm="Disconnect and wipe the WhatsApp session?">{{template "icon-out"}}Disconnect</button>
   </div>
   {{else}}
   <div class="cd-tablist" role="tablist" aria-label="Linking method">
@@ -28,14 +28,14 @@
   </div>
   <div id="cd-panel-qr" role="tabpanel" aria-labelledby="cd-tab-qr" tabindex="0">
     <div id="cd-qr-slot" class="slot" role="status" aria-live="polite" aria-atomic="true" style="min-height:180px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.75rem; text-align:center;"><em class="muted">No QR yet — click below to generate.</em></div>
-    <div class="toolbar" style="margin-top:.75rem; justify-content:center;"><button type="button" class="btn btn-sm" hx-post="/api/v1/connection/qr" hx-target="#cd-qr-slot" hx-swap="innerHTML" hx-indicator="#cd-qr-spin">{{template "icon-search"}}Get QR code</button><span id="cd-qr-spin" class="muted htmx-indicator">generating…</span></div>
+    <div class="toolbar" style="margin-top:.75rem; justify-content:center;"><button type="button" class="btn btn-sm" hx-post="/api/v1/connection/qr{{if .AccountID}}?account={{.AccountID}}{{end}}" hx-target="#cd-qr-slot" hx-swap="innerHTML" hx-indicator="#cd-qr-spin">{{template "icon-search"}}Get QR code</button><span id="cd-qr-spin" class="muted htmx-indicator">generating…</span></div>
     <p class="muted" style="font-size:0.78rem; text-align:center; margin-top:.5rem;">WhatsApp → Linked devices → Link a device · Expires in ~2 minutes</p>
   </div>
   <div id="cd-panel-pair" role="tabpanel" aria-labelledby="cd-tab-pair" tabindex="0" hidden>
     <div class="form-row"><label class="label" for="cd-pair-phone">Phone (E.164)</label>
       <div style="display:flex; gap:0.5rem; align-items:center;">
         <input id="cd-pair-phone" class="input" name="phone" inputmode="tel" autocomplete="tel" placeholder="+15551234567" style="flex:1; min-width:0;" />
-        <button type="button" class="btn btn-secondary btn-sm" hx-post="/api/v1/connection/pair" hx-include="#cd-pair-phone" hx-target="#cd-pair-slot" hx-swap="innerHTML" hx-indicator="#cd-pair-spin" style="flex-shrink:0; align-self:stretch; height:auto;">{{template "icon-msg"}}Request code</button>
+        <button type="button" class="btn btn-secondary btn-sm" hx-post="/api/v1/connection/pair{{if .AccountID}}?account={{.AccountID}}{{end}}" hx-include="#cd-pair-phone" hx-target="#cd-pair-slot" hx-swap="innerHTML" hx-indicator="#cd-pair-spin" style="flex-shrink:0; align-self:stretch; height:auto;">{{template "icon-msg"}}Request code</button>
       </div>
       <span id="cd-pair-spin" class="muted htmx-indicator" style="font-size:0.78rem;">requesting…</span>
     </div>

@@ -1,0 +1,26 @@
+{{define "content"}}
+<section class="card" style="max-width:24rem;margin:3rem auto">
+  <div class="card-head" style="align-items:center;text-align:center">
+    <span class="brand-mark" style="width:2.5rem;height:2.5rem">{{template "icon-msg"}}</span>
+    <p class="card-title">Team invite</p>
+  </div>
+  <div class="card-body">
+    {{if .Error}}<div role="alert" class="alert alert-destructive">{{template "icon-alert"}}<div class="alert-title">Invite invalid</div>
+      <div class="alert-desc">The link expired or was already used.</div>
+    </div>{{else if .Matches}}
+    <p class="card-desc">Join <strong>{{.OrgName}}</strong> as <strong>{{.Invite.Email}}</strong> ({{.Invite.Role}}).</p>
+    <form method="post" action="/invite/accept" style="margin-top:1rem">
+      <input type="hidden" name="token" value="{{.Token}}" />
+      <button class="btn btn-block" type="submit">Join {{.OrgName}}</button>
+    </form>
+    {{else if .LoggedIn}}
+    <p class="card-desc">This invite is for <strong>{{.Invite.Email}}</strong>. Sign in with that address, or <a
+        href="/signup?invite={{.Token}}">create an account</a>.</p>
+    {{else}}
+    <p class="card-desc">You’ve been invited to <strong>{{.OrgName}}</strong> as <strong>{{.Invite.Email}}</strong>.</p>
+    <p style="margin-top:1rem"><a class="btn btn-block" href="/signup?invite={{.Token}}">Accept invite</a></p>
+    <p class="card-desc" style="margin-top:1rem;text-align:center"><a href="/login">Already have an account?</a></p>
+    {{end}}
+  </div>
+</section>
+{{end}}

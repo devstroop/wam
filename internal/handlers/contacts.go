@@ -34,8 +34,12 @@ func contactParams(r *http.Request) (q, groupID string, limit int, cursor string
 
 // List returns a page of contacts.
 func (h *Contacts) List(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	q, groupID, limit, cursor := contactParams(r)
-	data, next, err := h.Store.ListContacts(q, groupID, limit, cursor)
+	data, next, err := db.ListContacts(q, groupID, limit, cursor)
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -45,8 +49,12 @@ func (h *Contacts) List(w http.ResponseWriter, r *http.Request) {
 
 // Rows renders table rows (htmx fragment, honors q/group_id filters).
 func (h *Contacts) Rows(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	q, groupID, limit, _ := contactParams(r)
-	data, _, err := h.Store.ListContacts(q, groupID, limit, "")
+	data, _, err := db.ListContacts(q, groupID, limit, "")
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -56,6 +64,10 @@ func (h *Contacts) Rows(w http.ResponseWriter, r *http.Request) {
 
 // Create adds a contact (JSON or htmx form).
 func (h *Contacts) Create(w http.ResponseWriter, r *http.Request) {
+	id, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Phone    string   `json:"phone"`
 		Name     string   `json:"name"`
@@ -74,7 +86,13 @@ func (h *Contacts) Create(w http.ResponseWriter, r *http.Request) {
 			body.GroupIDs = []string{gid}
 		}
 	}
-	c, err := h.Store.CreateContact(body.Phone, body.Name, body.GroupIDs)
+	if db.IsPostgres() {
+		if err := db.CheckQuota(id.OrgID, "contact"); err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+	}
+	c, err := db.CreateContact(body.Phone, body.Name, body.GroupIDs)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -88,7 +106,11 @@ func (h *Contacts) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get returns one contact.
 func (h *Contacts) Get(w http.ResponseWriter, r *http.Request) {
-	c, err := h.Store.GetContact(r.PathValue("id"))
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	c, err := db.GetContact(r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -98,6 +120,10 @@ func (h *Contacts) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update patches phone/name and optionally membership.
 func (h *Contacts) Update(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body")
@@ -116,7 +142,7 @@ func (h *Contacts) Update(w http.ResponseWriter, r *http.Request) {
 		changeGroups = true
 		_ = json.Unmarshal(v, &groupIDs)
 	}
-	c, err := h.Store.UpdateContact(r.PathValue("id"), phone, name, groupIDs, changeGroups)
+	c, err := db.UpdateContact(r.PathValue("id"), phone, name, groupIDs, changeGroups)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -130,7 +156,11 @@ func (h *Contacts) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a contact.
 func (h *Contacts) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.DeleteContact(r.PathValue("id")); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
+	if err := db.DeleteContact(r.PathValue("id")); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
@@ -146,6 +176,10 @@ func (h *Contacts) Delete(w http.ResponseWriter, r *http.Request) {
 // Import accepts multipart CSV (phone,name columns, header optional).
 // Returns 202 {accepted, skipped}; HTML receipt for htmx.
 func (h *Contacts) Import(w http.ResponseWriter, r *http.Request) {
+	id, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
 	if err := r.ParseMultipartForm(5<<20 + 1024); err != nil {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "multipart file required (max 5MB)")
@@ -158,7 +192,29 @@ func (h *Contacts) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	items, skipped := parseContactsCSV(f)
-	accepted, skipped2 := h.Store.ImportContacts(items)
+	if db.IsPostgres() {
+		// Cap the batch at remaining quota (exact: never overfills).
+		plan, err := db.EffectivePlan(id.OrgID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		usage, err := db.UsageForOrg(id.OrgID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		if max := plan.Limits.Contacts; max >= 0 {
+			if remaining := max - usage.Contacts; remaining <= 0 {
+				writeStoreError(w, r, &store.QuotaError{Resource: "contacts", Limit: max, Plan: plan.Code})
+				return
+			} else if len(items) > remaining {
+				skipped += len(items) - remaining
+				items = items[:remaining]
+			}
+		}
+	}
+	accepted, skipped2 := db.ImportContacts(items)
 	skipped += skipped2
 	if middleware.IsHTMX(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -223,10 +279,17 @@ func looksLikeHeader(rec []string) bool {
 }
 
 func writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
+	var qe *store.QuotaError
+	if errors.As(err, &qe) {
+		WriteProblem(w, r, http.StatusPaymentRequired, "Payment Required", err.Error())
+		return
+	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		WriteProblem(w, r, http.StatusNotFound, "Not Found", "resource not found")
 	case strings.Contains(err.Error(), "already exists"):
+		WriteProblem(w, r, http.StatusConflict, "Conflict", err.Error())
+	case strings.Contains(err.Error(), "last admin"):
 		WriteProblem(w, r, http.StatusConflict, "Conflict", err.Error())
 	case strings.Contains(err.Error(), "invalid") ||
 		strings.Contains(err.Error(), "cannot transition") ||

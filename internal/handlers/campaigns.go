@@ -20,8 +20,12 @@ type Campaigns struct {
 
 // List returns a page of campaigns with counters.
 func (h *Campaigns) List(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	data, next, err := h.Store.ListCampaigns(limit, r.URL.Query().Get("cursor"))
+	data, next, err := db.ListCampaigns(limit, r.URL.Query().Get("cursor"))
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -32,6 +36,10 @@ func (h *Campaigns) List(w http.ResponseWriter, r *http.Request) {
 // Create snapshots the audience and returns the campaign (JSON or form).
 // bodyTemplate may come directly or via template_id (template body is copied).
 func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
+	id, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name         string   `json:"name"`
 		BodyTemplate string   `json:"bodyTemplate"`
@@ -39,6 +47,7 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		GroupIDs     []string `json:"group_ids"`
 		ContactIDs   []string `json:"contact_ids"`
 		ScheduledAt  string   `json:"scheduledAt"`
+		WaAccountID  string   `json:"wa_account_id"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -56,20 +65,27 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		body.ScheduledAt = r.FormValue("scheduledAt")
 		body.GroupIDs = r.Form["group_ids"]
 		body.ContactIDs = r.Form["contact_ids"]
+		body.WaAccountID = r.FormValue("wa_account_id")
+	}
+	accountID, err := ResolveCampaignAccount(db, id, body.WaAccountID)
+	if err != nil {
+		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+		return
 	}
 	if strings.TrimSpace(body.BodyTemplate) == "" && strings.TrimSpace(body.TemplateID) != "" {
-		t, err := h.Store.GetTemplate(strings.TrimSpace(body.TemplateID))
+		t, err := db.GetTemplate(strings.TrimSpace(body.TemplateID))
 		if err != nil {
 			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "unknown template_id")
 			return
 		}
 		body.BodyTemplate = t.Body
 	}
-	c, err := h.Store.CreateCampaign(body.Name, body.BodyTemplate, body.GroupIDs, body.ContactIDs, body.ScheduledAt)
+	c, err := db.CreateCampaign(body.Name, body.BodyTemplate, body.GroupIDs, body.ContactIDs, body.ScheduledAt, accountID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns.create", "campaign", c.ID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Campaign created"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -79,7 +95,11 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get returns one campaign.
 func (h *Campaigns) Get(w http.ResponseWriter, r *http.Request) {
-	c, err := h.Store.GetCampaign(r.PathValue("id"))
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	c, err := db.GetCampaign(r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -90,6 +110,10 @@ func (h *Campaigns) Get(w http.ResponseWriter, r *http.Request) {
 // Update edits a draft/scheduled campaign.
 // Accepts template_id as an alias for replacing the message from a template.
 func (h *Campaigns) Update(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name         string `json:"name"`
 		BodyTemplate string `json:"bodyTemplate"`
@@ -100,14 +124,14 @@ func (h *Campaigns) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(body.BodyTemplate) == "" && strings.TrimSpace(body.TemplateID) != "" {
-		t, err := h.Store.GetTemplate(strings.TrimSpace(body.TemplateID))
+		t, err := db.GetTemplate(strings.TrimSpace(body.TemplateID))
 		if err != nil {
 			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "unknown template_id")
 			return
 		}
 		body.BodyTemplate = t.Body
 	}
-	c, err := h.Store.UpdateCampaign(r.PathValue("id"), body.Name, body.BodyTemplate)
+	c, err := db.UpdateCampaign(r.PathValue("id"), body.Name, body.BodyTemplate)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -117,10 +141,16 @@ func (h *Campaigns) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a campaign with its recipients.
 func (h *Campaigns) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.DeleteCampaign(r.PathValue("id")); err != nil {
+	id, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
+	if !ok {
+		return
+	}
+	campaignID := r.PathValue("id")
+	if err := db.DeleteCampaign(campaignID); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns.delete", "campaign", campaignID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Campaign deleted"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -130,13 +160,38 @@ func (h *Campaigns) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// transition runs a lifecycle change with htmx feedback.
-func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, to, toast string) {
-	c, err := h.Store.SetCampaignStatus(r.PathValue("id"), to)
+// transition runs a lifecycle change with htmx feedback. Starts additionally
+// require account use-access on the campaign's pinned sender (viewers may
+// draft but never launch).
+func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, perm, to, toast string) {
+	id, db, ok := Authorize(h.Store, w, r, perm)
+	if !ok {
+		return
+	}
+	if to == store.CampaignSending && !h.checkSendAccount(w, r, id, db) {
+		return
+	}
+	var c *store.Campaign
+	var err error
+	if to == store.CampaignSending {
+		// Launch transitions + enqueues atomically (PG queue; no-op more).
+		c, err = db.LaunchCampaign(r.PathValue("id"))
+	} else {
+		c, err = db.SetCampaignStatus(r.PathValue("id"), to)
+		if err == nil && db.IsPostgres() {
+			switch to {
+			case store.CampaignPaused:
+				_ = db.ReleaseCampaignJobs(c.ID)
+			case store.CampaignCancelled:
+				_ = db.DropCampaignJobs(c.ID)
+			}
+		}
+	}
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns."+to, "campaign", c.ID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"`+toast+`"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -144,34 +199,67 @@ func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, to, toast
 	WriteJSON(w, http.StatusAccepted, c)
 }
 
+// checkSendAccount enforces per-account send access on launch. Legacy
+// SQLite (no identity/accounts) passes.
+func (h *Campaigns) checkSendAccount(w http.ResponseWriter, r *http.Request, id middleware.Identity, db *store.DB) bool {
+	if !db.IsPostgres() {
+		return true
+	}
+	c, err := db.GetCampaign(r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, r, err)
+		return false
+	}
+	aid := c.WaAccountID
+	if aid == "" {
+		if aid, err = ResolveSenderAccount(db, id, ""); err != nil {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+			return false
+		}
+	}
+	if !store.CanAccount(id.Role, id.Grants, aid, true) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "no send access on that WhatsApp account")
+		return false
+	}
+	if err := db.CheckQuota(id.OrgID, "message"); err != nil {
+		writeStoreError(w, r, err)
+		return false
+	}
+	return true
+}
+
 // Start begins sending (draft/scheduled → sending).
 func (h *Campaigns) Start(w http.ResponseWriter, r *http.Request) {
-	h.transition(w, r, store.CampaignSending, "Campaign started")
+	h.transition(w, r, store.PermCampaignsSend, store.CampaignSending, "Campaign started")
 }
 
 // Pause halts mid-flight (sending → paused).
 func (h *Campaigns) Pause(w http.ResponseWriter, r *http.Request) {
-	h.transition(w, r, store.CampaignPaused, "Campaign paused")
+	h.transition(w, r, store.PermCampaignsManage, store.CampaignPaused, "Campaign paused")
 }
 
 // Resume continues (paused → sending).
 func (h *Campaigns) Resume(w http.ResponseWriter, r *http.Request) {
-	h.transition(w, r, store.CampaignSending, "Campaign resumed")
+	h.transition(w, r, store.PermCampaignsSend, store.CampaignSending, "Campaign resumed")
 }
 
 // Cancel stops permanently.
 func (h *Campaigns) Cancel(w http.ResponseWriter, r *http.Request) {
-	h.transition(w, r, store.CampaignCancelled, "Campaign cancelled")
+	h.transition(w, r, store.PermCampaignsManage, store.CampaignCancelled, "Campaign cancelled")
 }
 
 // Recipients lists per-contact delivery states.
 func (h *Campaigns) Recipients(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.Store.GetCampaign(r.PathValue("id")); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	if _, err := db.GetCampaign(r.PathValue("id")); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	data, next, err := h.Store.ListRecipients(r.PathValue("id"), limit, r.URL.Query().Get("cursor"))
+	data, next, err := db.ListRecipients(r.PathValue("id"), limit, r.URL.Query().Get("cursor"))
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -181,11 +269,15 @@ func (h *Campaigns) Recipients(w http.ResponseWriter, r *http.Request) {
 
 // Funnel returns status counters for a campaign.
 func (h *Campaigns) Funnel(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.Store.GetCampaign(r.PathValue("id")); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	if _, err := db.GetCampaign(r.PathValue("id")); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	f, err := h.Store.RecipientFunnel(r.PathValue("id"))
+	f, err := db.RecipientFunnel(r.PathValue("id"))
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -195,7 +287,11 @@ func (h *Campaigns) Funnel(w http.ResponseWriter, r *http.Request) {
 
 // Rows renders the campaign table fragment.
 func (h *Campaigns) Rows(w http.ResponseWriter, r *http.Request) {
-	data, _, err := h.Store.ListCampaigns(20, "")
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, _, err := db.ListCampaigns(20, "")
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -207,7 +303,11 @@ func (h *Campaigns) Rows(w http.ResponseWriter, r *http.Request) {
 func (h *Campaigns) AudienceContacts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	cursor := r.URL.Query().Get("cursor")
-	data, next, err := h.Store.ListContacts(q, "", 20, cursor)
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, next, err := db.ListContacts(q, "", 20, cursor)
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -222,11 +322,15 @@ func (h *Campaigns) RecipientRows(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "campaign query param required", http.StatusBadRequest)
 		return
 	}
-	data, _, err := h.Store.ListRecipients(id, 50, "")
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, _, err := db.ListRecipients(id, 50, "")
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
 	}
-	f, _ := h.Store.RecipientFunnel(id)
+	f, _ := db.RecipientFunnel(id)
 	h.Views.RenderPartial(w, "recipient-rows", map[string]any{"Recipients": data, "Funnel": f})
 }

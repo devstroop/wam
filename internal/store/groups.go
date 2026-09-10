@@ -23,8 +23,15 @@ func (db *DB) CreateGroup(name, color string) (*Group, error) {
 		return nil, fmt.Errorf("invalid group name")
 	}
 	g := &Group{ID: uuid.NewString(), Name: name, Color: strings.TrimSpace(color)}
-	if _, err := db.Exec(`INSERT INTO groups (id, name, color) VALUES (?, ?, ?)`, g.ID, g.Name, g.Color); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+	var err error
+	if db.IsPostgres() {
+		_, err = db.Exec(`INSERT INTO groups (id, name, color, org_id) VALUES (?, ?, ?, ?)`,
+			g.ID, g.Name, g.Color, db.orgOr(DefaultOrgID))
+	} else {
+		_, err = db.Exec(`INSERT INTO groups (id, name, color) VALUES (?, ?, ?)`, g.ID, g.Name, g.Color)
+	}
+	if err != nil {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("group name already exists")
 		}
 		return nil, err
@@ -78,7 +85,7 @@ func (db *DB) UpdateGroup(id, name, color string) (*Group, error) {
 	}
 	cur.Color = strings.TrimSpace(color)
 	if _, err := db.Exec(`UPDATE groups SET name = ?, color = ? WHERE id = ?`, cur.Name, cur.Color, id); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("group name already exists")
 		}
 		return nil, err
@@ -114,6 +121,14 @@ func (db *DB) SetGroupMembers(groupID string, contactIDs []string) error {
 	}
 	for _, cid := range contactIDs {
 		if strings.TrimSpace(cid) == "" {
+			continue
+		}
+		if db.IsPostgres() {
+			_, err := tx.Exec(`INSERT INTO contact_groups (contact_id, group_id)
+				SELECT ?, ? WHERE EXISTS (SELECT 1 FROM contacts WHERE id = ?) ON CONFLICT DO NOTHING`, cid, groupID, cid)
+			if err != nil {
+				return err
+			}
 			continue
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO contact_groups (contact_id, group_id)
