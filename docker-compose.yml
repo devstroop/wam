@@ -2,9 +2,10 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      # No default passwords committed: set them in .env (see .env.example).
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
     ports:
       - "5432:5432"
     volumes:
@@ -33,7 +34,7 @@ services:
     env_file:
       - .env
     environment:
-      WAM_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      WAM_DATABASE_URL: ${WAM_DATABASE_URL:?Set WAM_DATABASE_URL in .env (see .env.example)}
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,9 +55,9 @@ services:
       # No owner DSN here: the migrate job above owns DDL. Runtime serves via
       # the least-privilege role so RLS bites; owner creds never land on the
       # serving container.
-      WAM_APP_DATABASE_URL: postgres://wam_app:wam_app@postgres:5432/postgres?sslmode=disable
+      WAM_APP_DATABASE_URL: ${WAM_APP_DATABASE_URL:?Set WAM_APP_DATABASE_URL in .env (see .env.example)}
       # Session store DSN: owner (whatsmeow creates session tables at runtime).
-      WAM_WA_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      WAM_WA_DATABASE_URL: ${WAM_WA_DATABASE_URL:?Set WAM_WA_DATABASE_URL in .env (see .env.example)}
     volumes:
       - wam-data:/data
     depends_on:
