@@ -11,15 +11,34 @@ import (
 	"github.com/google/uuid"
 )
 
-// Messaging serves number checks + one-off sends against the live client.
+// Messaging serves number checks + one-off sends against live clients.
 // 503 when WhatsApp isn't connected.
 type Messaging struct {
-	WA *wa.Service
+	WA    *wa.Manager
+	Store *store.DB
+}
+
+// resolveSender picks the sending account (?account= or org default).
+func (h *Messaging) resolveSender(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, db, ok := Authorize(h.Store, w, r, store.PermCampaignsSend)
+	if !ok {
+		return "", false
+	}
+	if !db.IsPostgres() {
+		return store.LegacyAccountID, true
+	}
+	aid, err := ResolveSenderAccount(db, id, r.URL.Query().Get("account"))
+	if err != nil {
+		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+		return "", false
+	}
+	return aid, true
 }
 
 // Check reports WhatsApp registration per phone number.
 func (h *Messaging) Check(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermCampaignsSend); !ok {
+	accountID, ok := h.resolveSender(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -42,7 +61,7 @@ func (h *Messaging) Check(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]result, 0, len(body.Phones))
 	for _, p := range body.Phones {
-		jid, err := h.WA.ResolvePhone(ctx, p)
+		jid, err := h.WA.ResolvePhone(ctx, accountID, p)
 		if err != nil {
 			out = append(out, result{Phone: p})
 			continue
@@ -54,7 +73,8 @@ func (h *Messaging) Check(w http.ResponseWriter, r *http.Request) {
 
 // Send delivers a one-off text (resolves E.164 → JID first).
 func (h *Messaging) Send(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermCampaignsSend); !ok {
+	accountID, ok := h.resolveSender(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -67,12 +87,12 @@ func (h *Messaging) Send(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	jid, err := h.WA.ResolvePhone(ctx, body.To)
+	jid, err := h.WA.ResolvePhone(ctx, accountID, body.To)
 	if err != nil {
 		WriteProblem(w, r, http.StatusBadGateway, "Recipient unreachable", err.Error())
 		return
 	}
-	id, err := h.WA.SendText(ctx, jid, body.Body)
+	id, err := h.WA.SendText(ctx, accountID, jid, body.Body)
 	if err != nil {
 		WriteProblem(w, r, http.StatusBadGateway, "Send failed", err.Error())
 		return

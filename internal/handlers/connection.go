@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/devstroop/wam/internal/middleware"
@@ -15,28 +17,67 @@ import (
 
 // Connection serves the WhatsApp lifecycle.
 // JSON for API clients; HTML fragments when HX-Request is present.
+// Legacy single-account routes resolve the default account; per-account
+// routes live under /api/v1/accounts (see accounts.go).
 type Connection struct {
-	WA    *wa.Service
+	WA    *wa.Manager
 	Views *views.Views
+	Store *store.DB
+}
+
+// accountCtx resolves the target account: ?account= when given (view/use
+// checked), else the org's default (sole account). Legacy returns the
+// implicit account. ok=false after writing the error response.
+func (h *Connection) accountCtx(w http.ResponseWriter, r *http.Request, perm string, needUse bool) (id middleware.Identity, db *store.DB, accountID, deviceJID string, ok bool) {
+	id, db, ok = Authorize(h.Store, w, r, perm)
+	if !ok {
+		return middleware.Identity{}, nil, "", "", false
+	}
+	if !db.IsPostgres() {
+		return id, db, store.LegacyAccountID, "", true
+	}
+	want := r.URL.Query().Get("account")
+	if want == "" {
+		want = r.PathValue("account_id")
+	}
+	var aid string
+	var err error
+	if needUse {
+		aid, err = ResolveSenderAccount(db, id, want)
+	} else {
+		aid, err = ResolveViewerAccount(db, id, want)
+	}
+	if err != nil {
+		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+		return middleware.Identity{}, nil, "", "", false
+	}
+	a, err := db.GetAccount(aid)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return middleware.Identity{}, nil, "", "", false
+	}
+	return id, db, a.ID, a.DeviceJID, true
 }
 
 // Status returns live connection state.
 func (h *Connection) Status(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+	_, _, accountID, _, ok := h.accountCtx(w, r, store.PermAccountsView, false)
+	if !ok {
 		return
 	}
-	WriteJSON(w, http.StatusOK, h.WA.Status())
+	WriteJSON(w, http.StatusOK, h.WA.Status(accountID))
 }
 
 // QR returns a pairing QR: JSON {qr, expiresIn} for API, <img> for htmx.
 // Times out after ~45s waiting for the first code event.
 func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+	_, _, accountID, deviceJID, ok := h.accountCtx(w, r, store.PermAccountsPair, true)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	dataURL, err := h.WA.QRCodePNG(ctx)
+	dataURL, err := h.WA.QRCodePNG(ctx, accountID, deviceJID)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -51,7 +92,8 @@ func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
 
 // Pair starts phone-number linking: JSON {code} or HTML fragment.
 func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+	_, _, accountID, deviceJID, ok := h.accountCtx(w, r, store.PermAccountsPair, true)
+	if !ok {
 		return
 	}
 	var phone string
@@ -74,7 +116,7 @@ func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	code, err := h.WA.PairPhone(ctx, phone)
+	code, err := h.WA.PairPhone(ctx, accountID, deviceJID, phone)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -89,12 +131,16 @@ func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
 
 // Logout disconnects and wipes the session.
 func (h *Connection) Logout(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+	_, db, accountID, deviceJID, ok := h.accountCtx(w, r, store.PermAccountsPair, true)
+	if !ok {
 		return
 	}
-	if err := h.WA.Logout(); err != nil {
+	if err := h.WA.RemoveDevice(accountID, deviceJID); err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Logout failed", err.Error())
 		return
+	}
+	if db.IsPostgres() {
+		_ = db.MarkAccountLoggedOut(accountID)
 	}
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Refresh", "true")
@@ -107,10 +153,11 @@ func (h *Connection) Logout(w http.ResponseWriter, r *http.Request) {
 // Detail renders the rich status card for the Connect page (distinct from the
 // compact header badge). Polled live; shows phone + push name + state.
 func (h *Connection) Detail(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+	_, _, accountID, _, ok := h.accountCtx(w, r, store.PermAccountsView, false)
+	if !ok {
 		return
 	}
-	st := h.WA.Status()
+	st := h.WA.Status(accountID)
 	if h.Views == nil {
 		// Fallback when views unavailable (tests): compact badge.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -129,41 +176,87 @@ func (h *Connection) Detail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Sidebar renders the compose-style connection block below the logo
-// (polled every 15s). Offline → full-width "Link a device" button;
-// linking → amber variant; connected → account row. All open the dialog.
+// Sidebar renders one connection block per viewable account (polled every
+// 15s). Legacy renders the single implicit account. Each block opens the
+// dialog for its account.
 func (h *Connection) Sidebar(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+	id, db, ok := Authorize(h.Store, w, r, store.PermAccountsView)
+	if !ok {
 		return
 	}
-	st := h.WA.Status()
+	type row struct {
+		ID, Label, Phone, Sub, Class string
+		Live                         bool
+	}
+	rows := []row{}
+	addRow := func(id, label string, st wa.Status) {
+		display := st.Phone
+		switch {
+		case st.Connected && st.LoggedIn:
+			sub := "Connected"
+			if label != "" {
+				sub = label + " · Connected"
+			}
+			rows = append(rows, row{id, label, display, sub, "account-chip", true})
+		case st.Connected:
+			rows = append(rows, row{id, label, "Linking…", "Linking…", "link-device-btn is-linking", false})
+		default:
+			name := "Link a device"
+			if label != "" {
+				name = label + " · Not linked"
+			}
+			rows = append(rows, row{id, label, name, "Not linked", "link-device-btn is-off", false})
+		}
+	}
+	if db != nil && db.IsPostgres() {
+		if accounts, err := db.AccountsByOrg(id.OrgID); err == nil {
+			for _, a := range visibleAccounts(id, accounts) {
+				label := a.Label
+				if label == "" {
+					label = a.Phone
+				}
+				addRow(a.ID, label, h.WA.Status(a.ID))
+			}
+		}
+		if len(rows) == 0 {
+			rows = append(rows, row{"", "", "Link a device", "Pair an account in Connect", "link-device-btn is-off", false})
+		}
+	} else {
+		addRow(store.LegacyAccountID, "", h.WA.Status(store.LegacyAccountID))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	const waSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9.5 9a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg>`
-	var out string
-	switch {
-	case st.Connected && st.LoggedIn:
-		phone := template.HTMLEscapeString(st.Phone)
-		out = `<button type="button" class="account-chip" onclick="openConnectDialog()" title="WhatsApp connected">` +
-			`<span class="account-chip-icon">` + waSVG + `</span>` +
-			`<span class="sidebar-text account-meta"><span class="account-phone">` + phone + `</span><span class="account-sub">Connected</span></span>` +
-			`<span class="badge-dot is-live"></span></button>`
-	case st.Connected:
-		out = `<button type="button" class="link-device-btn is-linking" onclick="openConnectDialog()" title="Linking WhatsApp…">` +
-			`<span class="link-device-icon">` + waSVG + `</span><span class="sidebar-text">Linking…</span><span class="badge-dot"></span></button>`
-	default:
-		out = `<button type="button" class="link-device-btn is-off" onclick="openConnectDialog()" title="Link a WhatsApp device">` +
-			`<span class="link-device-icon">` + waSVG + `</span><span class="sidebar-text">Link a device</span><span class="badge-dot"></span></button>`
+	var out strings.Builder
+	for _, rw := range rows {
+		dot := `<span class="badge-dot"></span>`
+		if rw.Live {
+			dot = `<span class="badge-dot is-live"></span>`
+		}
+		fmt.Fprintf(&out, `<button type="button" class="%s" onclick="openConnectDialog(%s)" title="%s">`+
+			`<span class="account-chip-icon">%s</span>`+
+			`<span class="sidebar-text account-meta"><span class="account-phone">%s</span><span class="account-sub">%s</span></span>%s</button>`,
+			rw.Class, jsStr(rw.ID), template.HTMLEscapeString(rw.Phone),
+			waSVG, template.HTMLEscapeString(rw.Phone), template.HTMLEscapeString(rw.Sub), dot)
 	}
-	_, _ = w.Write([]byte(out))
+	_, _ = w.Write([]byte(out.String()))
+}
+
+// jsStr quotes a string for inline JS use.
+func jsStr(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
 }
 
 // Dialog renders the connect dialog body: rich status + disconnect when
 // linked, otherwise Scan QR / Pair tabs.
 func (h *Connection) Dialog(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+	_, _, accountID, _, ok := h.accountCtx(w, r, store.PermAccountsView, false)
+	if !ok {
 		return
 	}
-	st := h.WA.Status()
+	st := h.WA.Status(accountID)
 	if h.Views == nil {
 		http.Error(w, "views unavailable", http.StatusInternalServerError)
 		return
@@ -171,6 +264,7 @@ func (h *Connection) Dialog(w http.ResponseWriter, r *http.Request) {
 	h.Views.RenderPartial(w, "connect-dialog", map[string]any{
 		"Connected": st.Connected, "LoggedIn": st.LoggedIn,
 		"Phone": st.Phone, "PushName": st.PushName,
+		"AccountID": accountID,
 	})
 }
 

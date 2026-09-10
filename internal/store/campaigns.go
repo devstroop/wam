@@ -39,6 +39,7 @@ type Campaign struct {
 	GroupIDs     []string `json:"groupIds,omitempty"`
 	ContactIDs   []string `json:"contactIds,omitempty"`
 	ScheduledAt  string   `json:"scheduledAt,omitempty"`
+	WaAccountID  string   `json:"waAccountId,omitempty"`
 	CreatedAt    string   `json:"createdAt"`
 	Total        int      `json:"total"`
 	Queued       int      `json:"queued"`
@@ -73,14 +74,21 @@ func (f Funnel) Total() int {
 }
 
 // CreateCampaign inserts a draft/scheduled campaign and snapshots the audience.
-// Empty groupIDs+contactIDs targets ALL contacts.
-func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []string, scheduledAt string) (*Campaign, error) {
+// Empty groupIDs+contactIDs targets ALL contacts. waAccountID pins the sender
+// ("" = legacy/unset; handlers resolve the default before calling).
+// On Postgres a non-empty account must belong to the caller's org.
+func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []string, scheduledAt, waAccountID string) (*Campaign, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 200 {
 		return nil, fmt.Errorf("invalid campaign name")
 	}
 	if strings.TrimSpace(bodyTemplate) == "" {
 		return nil, fmt.Errorf("invalid message template")
+	}
+	if waAccountID != "" && db.IsPostgres() {
+		if _, err := db.GetAccount(waAccountID); err != nil {
+			return nil, fmt.Errorf("unknown account %q", waAccountID)
+		}
 	}
 	for _, gid := range groupIDs {
 		if _, err := db.GetGroup(gid); err != nil {
@@ -107,8 +115,8 @@ func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []s
 	}
 	defer tx.Rollback()
 	if db.IsPostgres() {
-		_, err = tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at, org_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt), db.orgOr(DefaultOrgID))
+		_, err = tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at, org_id, wa_account_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt), db.orgOr(DefaultOrgID), nullIfEmpty(waAccountID))
 	} else {
 		_, err = tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at)
 			VALUES (?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt))
@@ -195,10 +203,19 @@ func placeholders(n int) string {
 	return strings.Join(s, ",")
 }
 
+// nullIfEmpty maps "" to nil so optional FK columns store NULL, not ”.
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // GetCampaign fetches one campaign with recipient counters.
 func (db *DB) GetCampaign(id string) (*Campaign, error) {
 	c := &Campaign{}
 	var aud string
+	var waAccount sql.NullString
 	err := db.QueryRow(`SELECT id, name, status, body_template, audience_filter, scheduled_at, created_at
 		FROM campaigns WHERE id = ?`, id).Scan(&c.ID, &c.Name, &c.Status, &c.BodyTemplate, &aud, &c.ScheduledAt, &c.CreatedAt)
 	if err != nil {
@@ -206,6 +223,12 @@ func (db *DB) GetCampaign(id string) (*Campaign, error) {
 			return nil, sql.ErrNoRows
 		}
 		return nil, err
+	}
+	if db.IsPostgres() {
+		// wa_account_id lives only on Postgres (009); read separately to
+		// keep the shared query above working on SQLite.
+		_ = db.QueryRow(`SELECT wa_account_id FROM campaigns WHERE id = ?`, id).Scan(&waAccount)
+		c.WaAccountID = waAccount.String
 	}
 	var f struct {
 		GroupIDs   []string `json:"group_ids"`

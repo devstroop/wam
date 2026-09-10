@@ -14,6 +14,7 @@ import (
 	"github.com/devstroop/wam/internal/handlers"
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/views"
+	"github.com/devstroop/wam/internal/wa"
 )
 
 type captureMailer struct {
@@ -50,6 +51,10 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	}
 	ums := &handlers.UMS{Store: app, Views: v, Session: sess, Mailer: mailer, BaseURL: "http://test"}
 	contacts := &handlers.Contacts{Store: app, Views: v}
+	camps := &handlers.Campaigns{Store: app, Views: v}
+	mgr := wa.NewManager("", "", false, nil)
+	accts := &handlers.Accounts{Store: app, Mgr: mgr}
+	conn := &handlers.Connection{WA: mgr, Views: v, Store: app}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /signup", ums.SignupSubmit)
 	mux.HandleFunc("POST /login", ums.LoginSubmit)
@@ -67,6 +72,21 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("DELETE /api/v1/members/{user_id}", ums.RemoveMember)
 	mux.HandleFunc("GET /api/v1/contacts", contacts.List)
 	mux.HandleFunc("POST /api/v1/contacts", contacts.Create)
+	mux.HandleFunc("POST /api/v1/campaigns", camps.Create)
+	mux.HandleFunc("POST /api/v1/campaigns/{id}/start", camps.Start)
+	mux.HandleFunc("POST /api/v1/campaigns/{id}/cancel", camps.Cancel)
+	mux.HandleFunc("DELETE /api/v1/campaigns/{id}", camps.Delete)
+	mux.HandleFunc("GET /api/v1/accounts", accts.List)
+	mux.HandleFunc("POST /api/v1/accounts", accts.Create)
+	mux.HandleFunc("GET /api/v1/accounts/{id}", accts.Get)
+	mux.HandleFunc("PATCH /api/v1/accounts/{id}", accts.UpdateLabel)
+	mux.HandleFunc("DELETE /api/v1/accounts/{id}", accts.Delete)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/qr", accts.QR)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/pair", accts.Pair)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/logout", accts.Logout)
+	mux.HandleFunc("GET /api/v1/connection", conn.Status)
+	mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
+	mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
 	return sess.RequireUMS(app, nil)(mux), mailer
 }
 

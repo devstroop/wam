@@ -36,7 +36,7 @@ func (h *Campaigns) List(w http.ResponseWriter, r *http.Request) {
 // Create snapshots the audience and returns the campaign (JSON or form).
 // bodyTemplate may come directly or via template_id (template body is copied).
 func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
+	id, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
 	if !ok {
 		return
 	}
@@ -47,6 +47,7 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		GroupIDs     []string `json:"group_ids"`
 		ContactIDs   []string `json:"contact_ids"`
 		ScheduledAt  string   `json:"scheduledAt"`
+		WaAccountID  string   `json:"wa_account_id"`
 	}
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -64,6 +65,12 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		body.ScheduledAt = r.FormValue("scheduledAt")
 		body.GroupIDs = r.Form["group_ids"]
 		body.ContactIDs = r.Form["contact_ids"]
+		body.WaAccountID = r.FormValue("wa_account_id")
+	}
+	accountID, err := ResolveCampaignAccount(db, id, body.WaAccountID)
+	if err != nil {
+		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+		return
 	}
 	if strings.TrimSpace(body.BodyTemplate) == "" && strings.TrimSpace(body.TemplateID) != "" {
 		t, err := db.GetTemplate(strings.TrimSpace(body.TemplateID))
@@ -73,7 +80,7 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		body.BodyTemplate = t.Body
 	}
-	c, err := db.CreateCampaign(body.Name, body.BodyTemplate, body.GroupIDs, body.ContactIDs, body.ScheduledAt)
+	c, err := db.CreateCampaign(body.Name, body.BodyTemplate, body.GroupIDs, body.ContactIDs, body.ScheduledAt, accountID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -150,10 +157,15 @@ func (h *Campaigns) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// transition runs a lifecycle change with htmx feedback.
+// transition runs a lifecycle change with htmx feedback. Starts additionally
+// require account use-access on the campaign's pinned sender (viewers may
+// draft but never launch).
 func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, perm, to, toast string) {
-	_, db, ok := Authorize(h.Store, w, r, perm)
+	id, db, ok := Authorize(h.Store, w, r, perm)
 	if !ok {
+		return
+	}
+	if to == store.CampaignSending && !h.checkSendAccount(w, r, id, db) {
 		return
 	}
 	c, err := db.SetCampaignStatus(r.PathValue("id"), to)
@@ -166,6 +178,31 @@ func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, perm, to,
 		w.Header().Set("HX-Refresh", "true")
 	}
 	WriteJSON(w, http.StatusAccepted, c)
+}
+
+// checkSendAccount enforces per-account send access on launch. Legacy
+// SQLite (no identity/accounts) passes.
+func (h *Campaigns) checkSendAccount(w http.ResponseWriter, r *http.Request, id middleware.Identity, db *store.DB) bool {
+	if !db.IsPostgres() {
+		return true
+	}
+	c, err := db.GetCampaign(r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, r, err)
+		return false
+	}
+	aid := c.WaAccountID
+	if aid == "" {
+		if aid, err = ResolveSenderAccount(db, id, ""); err != nil {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+			return false
+		}
+	}
+	if !store.CanAccount(id.Role, id.Grants, aid, true) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "no send access on that WhatsApp account")
+		return false
+	}
+	return true
 }
 
 // Start begins sending (draft/scheduled → sending).

@@ -92,14 +92,6 @@ func (s *Session) RequireUMS(db *store.DB, log *slog.Logger) func(http.Handler) 
 				orgID, role = memberships[0].OrgID, memberships[0].Role
 				_ = db.SetSessionOrg(HashToken(raw), orgID)
 			}
-			grants := map[string]string{}
-			if role != store.RoleAdmin {
-				if gs, err := db.GrantsForUser(user.ID, orgID); err == nil {
-					for _, g := range gs {
-						grants[g.AccountID] = g.Role
-					}
-				}
-			}
 			tx, err := db.BeginOrgTx(r.Context(), orgID)
 			if err != nil {
 				log.Warn("ums: org tx failed", "err", err)
@@ -112,7 +104,18 @@ func (s *Session) RequireUMS(db *store.DB, log *slog.Logger) func(http.Handler) 
 					_ = tx.Rollback()
 				}
 			}()
-			ctx := middleware.WithScopedDB(r.Context(), tx.DB(db.Driver))
+			// Identity reads run inside the org transaction: grants carry
+			// fail-closed RLS (009) and are invisible to unscoped handles.
+			odb := tx.DB(db.Driver)
+			grants := map[string]string{}
+			if role != store.RoleAdmin {
+				if gs, err := odb.GrantsForUser(user.ID, orgID); err == nil {
+					for _, g := range gs {
+						grants[g.AccountID] = g.Role
+					}
+				}
+			}
+			ctx := middleware.WithScopedDB(r.Context(), odb)
 			ctx = middleware.WithIdentity(ctx, middleware.Identity{
 				UserID: user.ID, Email: user.Email, Name: user.Name,
 				OrgID: orgID, Role: role, Grants: grants,

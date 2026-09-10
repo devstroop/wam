@@ -94,11 +94,16 @@
 </dialog>
 <div id="toasts" aria-live="polite"></div>
 <script>
-function openConnectDialog(){
+function openConnectDialog(accountId){
   var d=document.getElementById('connect-dialog');
   if(!d || typeof d.showModal !== 'function'){ location.href='/connect'; return; }
   var live=document.getElementById('connect-dialog-live');
-  if(window.htmx && live) htmx.trigger(live,'refresh');
+  if(live){
+    var url='/partials/connect-dialog';
+    if(accountId) url+='?account='+encodeURIComponent(accountId);
+    live.setAttribute('hx-get',url);
+    if(window.htmx){ htmx.process(live); htmx.trigger(live,'refresh'); }
+  }
   d.showModal();
 }
 (function(){

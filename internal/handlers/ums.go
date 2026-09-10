@@ -621,7 +621,7 @@ func (h *UMS) RemoveMember(w http.ResponseWriter, r *http.Request) {
 
 // ListGrants returns a member's account grants (?user_id=).
 func (h *UMS) ListGrants(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := h.gate(w, r, store.PermMembersManage)
+	id, db, ok := h.gate(w, r, store.PermMembersManage)
 	if !ok {
 		return
 	}
@@ -630,7 +630,7 @@ func (h *UMS) ListGrants(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "user_id required")
 		return
 	}
-	if _, err := h.Store.GetMembership(userID, id.OrgID); err != nil {
+	if _, err := db.GetMembership(userID, id.OrgID); err != nil {
 		if err == sql.ErrNoRows {
 			WriteProblem(w, r, http.StatusNotFound, "Not Found", "not a member")
 			return
@@ -638,7 +638,7 @@ func (h *UMS) ListGrants(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
 	}
-	grants, err := h.Store.GrantsForUser(userID, id.OrgID)
+	grants, err := db.GrantsForUser(userID, id.OrgID)
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -648,7 +648,7 @@ func (h *UMS) ListGrants(w http.ResponseWriter, r *http.Request) {
 
 // SetGrantSubmit grants a member access to an account.
 func (h *UMS) SetGrantSubmit(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := h.gate(w, r, store.PermMembersManage)
+	id, db, ok := h.gate(w, r, store.PermMembersManage)
 	if !ok {
 		return
 	}
@@ -666,11 +666,11 @@ func (h *UMS) SetGrantSubmit(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		body.UserID, body.AccountID, body.Role = r.FormValue("user_id"), r.FormValue("account_id"), r.FormValue("role")
 	}
-	if _, err := h.Store.GetMembership(body.UserID, id.OrgID); err != nil {
+	if _, err := db.GetMembership(body.UserID, id.OrgID); err != nil {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "grantee must be an org member")
 		return
 	}
-	g, err := h.Store.SetGrant(body.UserID, body.AccountID, id.OrgID, body.Role, id.UserID)
+	g, err := db.SetGrant(body.UserID, body.AccountID, id.OrgID, body.Role, id.UserID)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -686,7 +686,7 @@ func (h *UMS) SetGrantSubmit(w http.ResponseWriter, r *http.Request) {
 
 // RemoveGrantSubmit revokes account access.
 func (h *UMS) RemoveGrantSubmit(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := h.gate(w, r, store.PermMembersManage)
+	_, db, ok := h.gate(w, r, store.PermMembersManage)
 	if !ok {
 		return
 	}
@@ -703,8 +703,7 @@ func (h *UMS) RemoveGrantSubmit(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		body.UserID, body.AccountID = r.FormValue("user_id"), r.FormValue("account_id")
 	}
-	_ = id
-	if err := h.Store.RemoveGrant(body.UserID, body.AccountID); err != nil {
+	if err := db.RemoveGrant(body.UserID, body.AccountID); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
