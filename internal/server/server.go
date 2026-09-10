@@ -105,6 +105,7 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	// enumeration plus the runtime handle: all tenant data access runs
 	// inside WithOrg on the runtime handle (fail-closed RLS).
 	worker := campaigns.New(db, ownerDB, wasvc, log)
+	wasvc.OnReceipt = worker.OnReceipt
 	worker.Start()
 
 	mux := http.NewServeMux()

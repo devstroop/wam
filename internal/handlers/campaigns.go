@@ -168,7 +168,22 @@ func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, perm, to,
 	if to == store.CampaignSending && !h.checkSendAccount(w, r, id, db) {
 		return
 	}
-	c, err := db.SetCampaignStatus(r.PathValue("id"), to)
+	var c *store.Campaign
+	var err error
+	if to == store.CampaignSending {
+		// Launch transitions + enqueues atomically (PG queue; no-op more).
+		c, err = db.LaunchCampaign(r.PathValue("id"))
+	} else {
+		c, err = db.SetCampaignStatus(r.PathValue("id"), to)
+		if err == nil && db.IsPostgres() {
+			switch to {
+			case store.CampaignPaused:
+				_ = db.ReleaseCampaignJobs(c.ID)
+			case store.CampaignCancelled:
+				_ = db.DropCampaignJobs(c.ID)
+			}
+		}
+	}
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
