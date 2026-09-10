@@ -39,7 +39,7 @@ func (db *DB) CreateTemplate(name, body, category, language string) (*Template, 
 	t := &Template{ID: uuid.NewString(), Name: name, Body: body, Category: category, Language: language}
 	if _, err := db.Exec(`INSERT INTO templates (id, name, category, language, body) VALUES (?, ?, ?, ?, ?)`,
 		t.ID, t.Name, t.Category, t.Language, t.Body); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("template name already exists")
 		}
 		return nil, err
@@ -92,7 +92,7 @@ func (db *DB) UpdateTemplate(id, name, body string) (*Template, error) {
 		cur.Body = strings.TrimSpace(body)
 	}
 	if _, err := db.Exec(`UPDATE templates SET name = ?, body = ? WHERE id = ?`, cur.Name, cur.Body, id); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("template name already exists")
 		}
 		return nil, err

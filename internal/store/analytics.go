@@ -1,5 +1,7 @@
 package store
 
+import "fmt"
+
 // Overview aggregates account-wide marketing stats.
 type Overview struct {
 	Contacts     int       `json:"contacts"`
@@ -19,6 +21,15 @@ type DayStat struct {
 	Delivered int    `json:"delivered"`
 	Read      int    `json:"read"`
 	Failed    int    `json:"failed"`
+}
+
+// cutoffExpr returns a SQL expression evaluating to the RFC3339 UTC cutoff
+// N days ago, comparable lexicographically against TEXT sent_at.
+func (db *DB) cutoffExpr(days int) string {
+	if db.IsPostgres() {
+		return fmt.Sprintf("to_char(now() AT TIME ZONE 'UTC' - interval '%d days', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')", days)
+	}
+	return fmt.Sprintf("strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')", days)
 }
 
 // Overview computes headline stats + 14-day timeline.
@@ -75,12 +86,12 @@ func (db *DB) Overview() (Overview, error) {
 	}
 	// sent_at is RFC3339 UTC; lexicographic compare against a matching cutoff works.
 	if err := db.QueryRow(`SELECT COUNT(*) FROM campaign_recipients
-		WHERE status != 'queued' AND sent_at != '' AND sent_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')`).Scan(&o.Sent7d); err != nil {
+		WHERE status != 'queued' AND sent_at != '' AND sent_at >= ` + db.cutoffExpr(7)).Scan(&o.Sent7d); err != nil {
 		return o, err
 	}
 
 	trows, err := db.Query(`SELECT substr(sent_at,1,10) AS day, status, COUNT(*) FROM campaign_recipients
-		WHERE sent_at != '' AND sent_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-14 days')
+		WHERE sent_at != '' AND sent_at >= ` + db.cutoffExpr(14) + `
 		GROUP BY day, status ORDER BY day`)
 	if err != nil {
 		return o, err

@@ -163,6 +163,13 @@ func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []s
 	}
 	contactIDs = contactIDsResolved
 	for _, cid := range contactIDs {
+		if db.IsPostgres() {
+			_, err := tx.Exec(`INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES (?, ?) ON CONFLICT DO NOTHING`, c.ID, cid)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO campaign_recipients (campaign_id, contact_id) VALUES (?, ?)`, c.ID, cid); err != nil {
 			return nil, err
 		}

@@ -1,7 +1,8 @@
-// Package wa manages the WhatsApp connection for WAM.
+// Package wa manages WhatsApp connections for WAM.
 //
-// Backed by a SQLite sqlstore container in the same DB file as app tables
-// (separate table prefixes — whatsmeow owns its own schema).
+// Session store: Postgres sqlstore when WAM_DATABASE_URL is set (SaaS path),
+// else the legacy SQLite file (separate table prefixes — whatsmeow owns its
+// own schema).
 //
 // Lifecycle: lazy client (no connection at boot) + background auto-connect
 // when a stored session exists. Pairing via QR (GetQR) or phone code
@@ -15,9 +16,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	waCompanionReg "go.mau.fi/whatsmeow/proto/waCompanionReg"
@@ -47,12 +50,13 @@ type Status struct {
 
 // Service wraps the whatsmeow client.
 type Service struct {
-	mu        sync.RWMutex
-	dbPath    string
-	log       *slog.Logger
-	client    *whatsmeow.Client
-	container *sqlstore.Container
-	limiter   *tokenBucket
+	mu          sync.RWMutex
+	dbPath      string
+	databaseURL string
+	log         *slog.Logger
+	client      *whatsmeow.Client
+	container   *sqlstore.Container
+	limiter     *tokenBucket
 
 	// OnReceipt fires for delivery/read receipts (msgIDs, delivered|read).
 	// Set by the campaign worker to upgrade recipient states.
@@ -66,10 +70,17 @@ func JIDForPhone(phone string) string {
 
 // New creates the service. It does not connect; call AutoConnect in background.
 func New(dbPath string, log *slog.Logger) *Service {
+	return NewWithDatabase(dbPath, "", log)
+}
+
+// NewWithDatabase creates the service with a Postgres session store when
+// databaseURL is set, else the legacy SQLite file. It does not connect;
+// call AutoConnect in background.
+func NewWithDatabase(dbPath, databaseURL string, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{dbPath: dbPath, log: log, limiter: newTokenBucket(30)}
+	return &Service{dbPath: dbPath, databaseURL: databaseURL, log: log, limiter: newTokenBucket(30)}
 }
 
 // Status snapshots connection state (never blocks).
@@ -118,6 +129,10 @@ func (s *Service) AutoConnect() {
 		s.log.Warn("wa: autoconnect store unavailable", "err", err)
 		return
 	}
+	// Probe-only handle: ownership of the live session passes to s.container
+	// inside prepareClientLocked (via Connect below), which opens its own
+	// container — so this one must close here, not leak a pool per boot.
+	defer container.Close()
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil || device == nil || device.ID == nil {
 		s.log.Info("wa: no stored session, waiting for pairing")
@@ -150,8 +165,30 @@ func (s *Service) Disconnect() {
 	}
 }
 
-// openContainer opens the SQLite sqlstore container (own handle, same file).
+// openContainer opens the sqlstore container: Postgres when databaseURL is
+// set (SaaS path, dialect "postgres"), else the legacy SQLite file.
+// The DSN must be an OWNER DSN: whatsmeow creates/upgrades its session tables
+// at runtime (Upgrade below), which the least-privilege app role cannot do.
+// whatsmeow owns its own tables; RLS on app tables does not apply to them.
 func (s *Service) openContainer(ctx context.Context) (*sqlstore.Container, error) {
+	if strings.TrimSpace(s.databaseURL) != "" {
+		db, err := sql.Open("pgx", s.databaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("wa: open session db: %w", err)
+		}
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+		if err := db.PingContext(ctx); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("wa: ping session db: %w", err)
+		}
+		c := sqlstore.NewWithDB(db, "postgres", waLog.Noop)
+		if err := c.Upgrade(ctx); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("wa: upgrade session store: %w", err)
+		}
+		return c, nil
+	}
 	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)", s.dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -168,11 +205,15 @@ func (s *Service) openContainer(ctx context.Context) (*sqlstore.Container, error
 }
 
 // prepareClientLocked creates client + store without connecting.
-// Caller must hold s.mu.
+// Caller must hold s.mu. A prior container handle is closed first so
+// re-Connect/GetQR cycles don't leak database connections.
 func (s *Service) prepareClientLocked(ctx context.Context) error {
 	container, err := s.openContainer(ctx)
 	if err != nil {
 		return err
+	}
+	if s.container != nil {
+		_ = s.container.Close()
 	}
 	s.container = container
 	device, err := container.GetFirstDevice(ctx)
@@ -339,6 +380,8 @@ func (s *Service) Logout() error {
 	if err != nil {
 		return err
 	}
+	// Cleanup probe only; never stored on s.container.
+	defer container.Close()
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		return fmt.Errorf("wa: get device for cleanup: %w", err)
