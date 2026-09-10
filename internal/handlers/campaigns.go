@@ -217,6 +217,10 @@ func (h *Campaigns) checkSendAccount(w http.ResponseWriter, r *http.Request, id 
 		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "no send access on that WhatsApp account")
 		return false
 	}
+	if err := db.CheckQuota(id.OrgID, "message"); err != nil {
+		writeStoreError(w, r, err)
+		return false
+	}
 	return true
 }
 

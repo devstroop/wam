@@ -158,6 +158,18 @@ func (w *Worker) runQueueForOrg(db *store.DB, orgID string) {
 		w.log.Info("campaigns: scheduled -> sending", "id", id)
 	}
 
+	// Runtime quota gate: exhausted message quota auto-pauses sending
+	// campaigns before any claim, instead of over-sending mid-flight.
+	if sending, err := db.SendingCampaigns(); err == nil {
+		for _, id := range sending {
+			if qerr := db.CheckSendQuota(); qerr != nil {
+				w.log.Warn("campaigns: quota exhausted, auto-pausing", "id", id, "err", qerr)
+				_, _ = db.SetCampaignStatus(id, store.CampaignPaused)
+				_ = db.ReleaseCampaignJobs(id)
+			}
+		}
+	}
+
 	// Accounts to drain: every org account plus the NULL pin (legacy rows).
 	accounts, err := db.AccountsByOrg(orgID)
 	if err != nil {

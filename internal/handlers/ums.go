@@ -534,6 +534,12 @@ func (h *UMS) InviteMember(w http.ResponseWriter, r *http.Request) {
 	if body.Role == "" {
 		body.Role = store.RoleUser
 	}
+	if db.IsPostgres() {
+		if err := db.CheckQuota(id.OrgID, "member"); err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+	}
 	raw, digest, err := auth.NewToken()
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())

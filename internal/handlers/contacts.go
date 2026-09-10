@@ -64,7 +64,7 @@ func (h *Contacts) Rows(w http.ResponseWriter, r *http.Request) {
 
 // Create adds a contact (JSON or htmx form).
 func (h *Contacts) Create(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	id, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
 	if !ok {
 		return
 	}
@@ -84,6 +84,12 @@ func (h *Contacts) Create(w http.ResponseWriter, r *http.Request) {
 		body.Name = r.FormValue("name")
 		if gid := r.FormValue("group_id"); gid != "" {
 			body.GroupIDs = []string{gid}
+		}
+	}
+	if db.IsPostgres() {
+		if err := db.CheckQuota(id.OrgID, "contact"); err != nil {
+			writeStoreError(w, r, err)
+			return
 		}
 	}
 	c, err := db.CreateContact(body.Phone, body.Name, body.GroupIDs)
@@ -170,7 +176,7 @@ func (h *Contacts) Delete(w http.ResponseWriter, r *http.Request) {
 // Import accepts multipart CSV (phone,name columns, header optional).
 // Returns 202 {accepted, skipped}; HTML receipt for htmx.
 func (h *Contacts) Import(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	id, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
 	if !ok {
 		return
 	}
@@ -186,6 +192,28 @@ func (h *Contacts) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	items, skipped := parseContactsCSV(f)
+	if db.IsPostgres() {
+		// Cap the batch at remaining quota (exact: never overfills).
+		plan, err := db.EffectivePlan(id.OrgID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		usage, err := db.UsageForOrg(id.OrgID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		if max := plan.Limits.Contacts; max >= 0 {
+			if remaining := max - usage.Contacts; remaining <= 0 {
+				writeStoreError(w, r, &store.QuotaError{Resource: "contacts", Limit: max, Plan: plan.Code})
+				return
+			} else if len(items) > remaining {
+				skipped += len(items) - remaining
+				items = items[:remaining]
+			}
+		}
+	}
 	accepted, skipped2 := db.ImportContacts(items)
 	skipped += skipped2
 	if middleware.IsHTMX(r) {
@@ -251,6 +279,11 @@ func looksLikeHeader(rec []string) bool {
 }
 
 func writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
+	var qe *store.QuotaError
+	if errors.As(err, &qe) {
+		WriteProblem(w, r, http.StatusPaymentRequired, "Payment Required", err.Error())
+		return
+	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		WriteProblem(w, r, http.StatusNotFound, "Not Found", "resource not found")
