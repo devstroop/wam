@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/wa"
 	"github.com/google/uuid"
 )
@@ -18,6 +19,9 @@ type Messaging struct {
 
 // Check reports WhatsApp registration per phone number.
 func (h *Messaging) Check(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermCampaignsSend); !ok {
+		return
+	}
 	var body struct {
 		Phones []string `json:"phones"`
 	}
@@ -50,6 +54,9 @@ func (h *Messaging) Check(w http.ResponseWriter, r *http.Request) {
 
 // Send delivers a one-off text (resolves E.164 → JID first).
 func (h *Messaging) Send(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermCampaignsSend); !ok {
+		return
+	}
 	var body struct {
 		To   string `json:"to"`
 		Body string `json:"body"`

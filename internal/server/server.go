@@ -31,6 +31,7 @@ import (
 	"github.com/devstroop/wam/internal/campaigns"
 	"github.com/devstroop/wam/internal/config"
 	"github.com/devstroop/wam/internal/handlers"
+	"github.com/devstroop/wam/internal/mail"
 	"github.com/devstroop/wam/internal/middleware"
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/views"
@@ -48,12 +49,18 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 			panic("datadir: " + err.Error())
 		}
 	}
-	db, err := store.OpenAuto(cfg.DBPath, cfg.DatabaseURL, cfg.AppDatabaseURL)
+	db, ownerDB, err := store.OpenAuto(cfg.DBPath, cfg.DatabaseURL, cfg.AppDatabaseURL)
 	if err != nil {
 		if cfg.UsesPostgres() && cfg.AppDatabaseURL != "" {
 			panic("store: run wam migrate-schema with the owner DSN first: " + err.Error())
 		}
 		panic("store: " + err.Error())
+	}
+	// Postgres boots the UMS stack (DB users + RBAC). If no users exist and
+	// an admin password is configured, seed the first admin so single-env
+	// bootstrap keeps working (email via WAM_ADMIN_EMAIL).
+	if cfg.UsesPostgres() {
+		seedAdmin(ownerDB, cfg, log)
 	}
 	sess := auth.New(cfg.AdminPassword, cfg.SessionSecret)
 	const htmxVersion = "4.0.0"
@@ -84,8 +91,10 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	analytics := &handlers.Analytics{Store: db, Views: v}
 
 	// Sender worker (single-flight). Started with the server; receipts flow
-	// back through wa.OnReceipt.
-	worker := campaigns.New(db, wasvc, log)
+	// back through wa.OnReceipt. The worker gets the owner handle for org
+	// enumeration plus the runtime handle: all tenant data access runs
+	// inside WithOrg on the runtime handle (fail-closed RLS).
+	worker := campaigns.New(db, ownerDB, wasvc, log)
 	worker.Start()
 
 	mux := http.NewServeMux()
@@ -109,10 +118,37 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 
 	// Web (htmx): public + dashboard shell.
 	mux.HandleFunc("GET /", web.Index)
-	mux.HandleFunc("GET /login", authH.LoginPage)
-	mux.HandleFunc("POST /login", authH.LoginSubmit)
-	mux.HandleFunc("POST /logout", authH.Logout)
-	mux.HandleFunc("GET /logout", authH.Logout)
+	if cfg.UsesPostgres() {
+		// UMS stack replaces single-admin auth (legacy kept for SQLite).
+		ums := &handlers.UMS{Store: db, Views: v, Session: sess, Mailer: mail.LogMailer{Log: log}, BaseURL: cfg.PublicBaseURL}
+		mux.HandleFunc("GET /login", ums.LoginPage)
+		mux.HandleFunc("POST /login", ums.LoginSubmit)
+		mux.HandleFunc("POST /logout", ums.LogoutSubmit)
+		mux.HandleFunc("GET /logout", ums.LogoutSubmit)
+		mux.HandleFunc("GET /signup", ums.SignupPage)
+		mux.HandleFunc("POST /signup", ums.SignupSubmit)
+		mux.HandleFunc("GET /verify", ums.VerifyPage)
+		mux.HandleFunc("GET /forgot", ums.ForgotPage)
+		mux.HandleFunc("POST /forgot", ums.ForgotSubmit)
+		mux.HandleFunc("GET /reset", ums.ResetPage)
+		mux.HandleFunc("POST /reset", ums.ResetSubmit)
+		mux.HandleFunc("GET /invite/accept", ums.InviteAcceptPage)
+		mux.HandleFunc("POST /invite/accept", ums.InviteAcceptSubmit)
+		mux.HandleFunc("GET /api/v1/auth/me", ums.Me)
+		mux.HandleFunc("POST /api/v1/auth/switch", ums.SwitchSubmit)
+		mux.HandleFunc("GET /api/v1/members", ums.ListMembers)
+		mux.HandleFunc("POST /api/v1/members/invite", ums.InviteMember)
+		mux.HandleFunc("PATCH /api/v1/members/{user_id}", ums.UpdateMemberRole)
+		mux.HandleFunc("DELETE /api/v1/members/{user_id}", ums.RemoveMember)
+		mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
+		mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
+		mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
+	} else {
+		mux.HandleFunc("GET /login", authH.LoginPage)
+		mux.HandleFunc("POST /login", authH.LoginSubmit)
+		mux.HandleFunc("POST /logout", authH.Logout)
+		mux.HandleFunc("GET /logout", authH.Logout)
+	}
 	mux.HandleFunc("GET /dashboard", web.Dashboard)
 	mux.HandleFunc("GET /connect", web.Connect)
 	mux.HandleFunc("GET /contacts", web.Contacts)
@@ -190,7 +226,11 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	var h http.Handler = mux
-	h = sess.RequireAdmin(h)
+	if cfg.UsesPostgres() {
+		h = sess.RequireUMS(db, log)(h)
+	} else {
+		h = sess.RequireAdmin(h)
+	}
 	h = middleware.SecurityHeaders(h)
 	h = middleware.CORS(h)
 	h = middleware.RequestID(h)

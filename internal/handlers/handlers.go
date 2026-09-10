@@ -5,8 +5,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/devstroop/wam/internal/middleware"
+	"github.com/devstroop/wam/internal/store"
 )
 
 // Problem is an RFC 9457 problem+json payload.
@@ -23,6 +25,27 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// Authorize resolves the request's org-scoped store handle and enforces perm.
+// Reads pass "" (any org member). Legacy SQLite requests carry no identity
+// and pass through (single-admin authorized at the middleware). Returns
+// ok=false after writing the 403/redirect — callers must return.
+func Authorize(fallback *store.DB, w http.ResponseWriter, r *http.Request, perm string) (middleware.Identity, *store.DB, bool) {
+	db := middleware.ScopedDB(r, fallback)
+	id, ok := middleware.IdentityFrom(r)
+	if !ok {
+		return middleware.Identity{}, db, true
+	}
+	if perm != "" && !store.Can(id.Role, perm) {
+		if middleware.IsHTMX(r) || strings.HasPrefix(r.URL.Path, "/api/") {
+			WriteProblem(w, r, http.StatusForbidden, "Forbidden", "missing permission "+perm)
+		} else {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		}
+		return middleware.Identity{}, nil, false
+	}
+	return id, db, true
 }
 
 // WriteProblem writes an RFC 9457 problem+json error.

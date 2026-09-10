@@ -29,13 +29,17 @@ func (h *Web) Index(w http.ResponseWriter, r *http.Request) {
 
 // Dashboard is the marketing home (live counts, funnel, WA status).
 func (h *Web) Dashboard(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	var contacts, groups, campaigns, queued int
-	if h.Store != nil {
-		contacts, groups, campaigns, queued = h.Store.Stats()
+	if db != nil {
+		contacts, groups, campaigns, queued = db.Stats()
 	}
 	var funnel store.Funnel
-	if h.Store != nil {
-		if o, err := h.Store.Overview(); err == nil {
+	if db != nil {
+		if o, err := db.Overview(); err == nil {
 			funnel = o.Funnel
 		}
 	}
@@ -64,9 +68,13 @@ func (h *Web) Connect(w http.ResponseWriter, r *http.Request) {
 
 // Contacts lists audiences (live table + group filter options).
 func (h *Web) Contacts(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	var groups []store.Group
-	if h.Store != nil {
-		groups, _ = h.Store.ListGroups()
+	if db != nil {
+		groups, _ = db.ListGroups()
 	}
 	h.Views.RenderApp(w, "contacts.html", map[string]any{"Title": "Contacts", "Nav": "contacts", "Groups": groups})
 }
@@ -78,19 +86,27 @@ func (h *Web) Groups(w http.ResponseWriter, r *http.Request) {
 
 // Campaigns lists broadcasts + new-campaign form (group + template options included).
 func (h *Web) Campaigns(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	var groups []store.Group
 	var templates []store.Template
-	if h.Store != nil {
-		groups, _ = h.Store.ListGroups()
-		templates, _ = h.Store.ListTemplates()
+	if db != nil {
+		groups, _ = db.ListGroups()
+		templates, _ = db.ListTemplates()
 	}
 	h.Views.RenderApp(w, "campaigns.html", map[string]any{"Title": "Campaigns", "Nav": "campaigns", "Groups": groups, "Templates": templates})
 }
 
 // CampaignDetail shows one campaign funnel + recipients (live poll).
 func (h *Web) CampaignDetail(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	id := r.PathValue("id")
-	c, err := h.Store.GetCampaign(id)
+	c, err := db.GetCampaign(id)
 	if err != nil {
 		http.Error(w, "campaign not found", http.StatusNotFound)
 		return
@@ -100,11 +116,15 @@ func (h *Web) CampaignDetail(w http.ResponseWriter, r *http.Request) {
 
 // Settings shows channel, app and data shortcuts.
 func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	var contacts, groups, campaigns, _ int
 	var templates int
-	if h.Store != nil {
-		contacts, groups, campaigns, _ = h.Store.Stats()
-		if ts, err := h.Store.ListTemplates(); err == nil {
+	if db != nil {
+		contacts, groups, campaigns, _ = db.Stats()
+		if ts, err := db.ListTemplates(); err == nil {
 			templates = len(ts)
 		}
 	}
@@ -123,7 +143,11 @@ func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
 
 // Analytics shows delivery funnels + timeline (live aggregates).
 func (h *Web) Analytics(w http.ResponseWriter, r *http.Request) {
-	o, err := h.Store.Overview()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	o, err := db.Overview()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return

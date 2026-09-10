@@ -103,8 +103,8 @@ func TestPostgresSmoke(t *testing.T) {
 	}
 }
 
-// TestPostgresAppRoleCRUD runs the full runtime write path as wam_app,
-// proving the scoped grants in 003 cover everything the server does.
+// TestPostgresAppRoleCRUD runs the full runtime write path as wam_app inside
+// org context, proving the scoped grants cover everything the server does.
 func TestPostgresAppRoleCRUD(t *testing.T) {
 	pgOwnerDSN(t) // schema must exist; migrations run via owner
 	appDB, err := OpenPostgresNoMigrate(pgAppDSN(t))
@@ -113,43 +113,48 @@ func TestPostgresAppRoleCRUD(t *testing.T) {
 	}
 	defer appDB.Close()
 
-	if _, err := appDB.DefaultOrg(); err != nil {
-		t.Fatalf("default org as app: %v", err)
-	}
-	c, err := appDB.CreateContact("+15550137602", "App Role", nil)
-	if err != nil {
-		t.Fatalf("create contact: %v", err)
-	}
-	g, err := appDB.CreateGroup("pg-app-group", "green")
-	if err != nil {
-		t.Fatalf("create group: %v", err)
-	}
-	if _, err := appDB.UpdateContact(c.ID, "", "", []string{g.ID}, true); err != nil {
-		t.Fatalf("membership: %v", err)
-	}
-	tmpl, err := appDB.CreateTemplate("pg-app-tmpl", "Hi {{name}}", "", "")
-	if err != nil {
-		t.Fatalf("create template: %v", err)
-	}
-	camp, err := appDB.CreateCampaign("pg-app-camp", tmpl.Body, []string{g.ID}, nil, "")
-	if err != nil {
-		t.Fatalf("create campaign: %v", err)
-	}
-	if camp.Total != 1 {
-		t.Fatalf("campaign total = %d", camp.Total)
-	}
-	if _, err := appDB.Overview(); err != nil {
-		t.Fatalf("overview: %v", err)
-	}
-	for _, cleanup := range []func() error{
-		func() error { return appDB.DeleteCampaign(camp.ID) },
-		func() error { return appDB.DeleteContact(c.ID) },
-		func() error { return appDB.DeleteGroup(g.ID) },
-		func() error { return appDB.DeleteTemplate(tmpl.ID) },
-	} {
-		if err := cleanup(); err != nil {
-			t.Fatalf("cleanup: %v", err)
+	if err := appDB.WithOrg(context.Background(), DefaultOrgID, func(odb *DB) error {
+		if _, err := odb.DefaultOrg(); err != nil {
+			return err
 		}
+		c, err := odb.CreateContact("+15550137602", "App Role", nil)
+		if err != nil {
+			return err
+		}
+		g, err := odb.CreateGroup("pg-app-group", "green")
+		if err != nil {
+			return err
+		}
+		if _, err := odb.UpdateContact(c.ID, "", "", []string{g.ID}, true); err != nil {
+			return err
+		}
+		tmpl, err := odb.CreateTemplate("pg-app-tmpl", "Hi {{name}}", "", "")
+		if err != nil {
+			return err
+		}
+		camp, err := odb.CreateCampaign("pg-app-camp", tmpl.Body, []string{g.ID}, nil, "")
+		if err != nil {
+			return err
+		}
+		if camp.Total != 1 {
+			return errors.New("campaign total != 1")
+		}
+		if _, err := odb.Overview(); err != nil {
+			return err
+		}
+		for _, cleanup := range []func() error{
+			func() error { return odb.DeleteCampaign(camp.ID) },
+			func() error { return odb.DeleteContact(c.ID) },
+			func() error { return odb.DeleteGroup(g.ID) },
+			func() error { return odb.DeleteTemplate(tmpl.ID) },
+		} {
+			if err := cleanup(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("app role crud: %v", err)
 	}
 }
 
@@ -183,7 +188,7 @@ func TestPostgresWithOrgIsolation(t *testing.T) {
 		t.Fatalf("seed membership: %v", err)
 	}
 
-	checkHidden := func(tx *Tx) error {
+	checkHidden := func(tx *DB) error {
 		var dummy string
 		if err := tx.QueryRow(`SELECT id FROM contacts WHERE id = ?`, c.ID).Scan(&dummy); !errors.Is(err, sql.ErrNoRows) {
 			t.Errorf("contacts visible to foreign org: err=%v", err)
@@ -214,7 +219,7 @@ func TestPostgresWithOrgIsolation(t *testing.T) {
 	if err := appDB.WithOrg(ctx, "org_other", checkHidden); err != nil {
 		t.Fatalf("withorg foreign: %v", err)
 	}
-	if err := appDB.WithOrg(ctx, DefaultOrgID, func(tx *Tx) error {
+	if err := appDB.WithOrg(ctx, DefaultOrgID, func(tx *DB) error {
 		var dummy string
 		if err := tx.QueryRow(`SELECT id FROM contacts WHERE id = ?`, c.ID).Scan(&dummy); err != nil {
 			t.Errorf("home org cannot see own row: %v", err)
@@ -269,7 +274,7 @@ func TestWithOrgEmpty(t *testing.T) {
 	}
 	defer db.Close()
 	for _, orgID := range []string{"", "   "} {
-		if err := db.WithOrg(context.Background(), orgID, func(*Tx) error { return nil }); err == nil {
+		if err := db.WithOrg(context.Background(), orgID, func(*DB) error { return nil }); err == nil {
 			t.Fatalf("WithOrg(%q) succeeded, want error", orgID)
 		}
 	}

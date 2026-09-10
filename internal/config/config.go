@@ -45,8 +45,11 @@ type Config struct {
 	// DataDir holds uploads/exports and is created at boot.
 	DataDir string
 	// AdminPassword is the single-admin password (env-only, never committed).
-	// Empty means auth is disabled (local dev convenience).
+	// Empty means auth is disabled (local dev convenience). On Postgres with
+	// zero users it seeds the first admin (email via AdminEmail).
 	AdminPassword string
+	// AdminEmail sets the seeded admin's email (Postgres bootstrap).
+	AdminEmail string
 	// SessionSecret signs the admin session cookie (32+ bytes in production).
 	SessionSecret string
 }
@@ -72,6 +75,7 @@ func Load() Config {
 		RedisURL:       getenv("WAM_REDIS_URL", ""),
 		DataDir:        getenv("WAM_DATA_DIR", "./data"),
 		AdminPassword:  getenv("WAM_ADMIN_PASSWORD", ""),
+		AdminEmail:     getenv("WAM_ADMIN_EMAIL", ""),
 		SessionSecret:  getenv("WAM_SESSION_SECRET", "dev-secret-change-me-32-bytes!!"),
 	}
 }

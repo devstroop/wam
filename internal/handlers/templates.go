@@ -17,7 +17,11 @@ type Templates struct {
 
 // List returns all templates.
 func (h *Templates) List(w http.ResponseWriter, r *http.Request) {
-	data, err := h.Store.ListTemplates()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, err := db.ListTemplates()
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -27,6 +31,10 @@ func (h *Templates) List(w http.ResponseWriter, r *http.Request) {
 
 // Create adds a template (JSON or form).
 func (h *Templates) Create(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermTemplatesManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name     string `json:"name"`
 		Body     string `json:"body"`
@@ -50,7 +58,7 @@ func (h *Templates) Create(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 		}
 	}
-	t, err := h.Store.CreateTemplate(body.Name, body.Body, body.Category, body.Language)
+	t, err := db.CreateTemplate(body.Name, body.Body, body.Category, body.Language)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -64,7 +72,11 @@ func (h *Templates) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get returns one template.
 func (h *Templates) Get(w http.ResponseWriter, r *http.Request) {
-	t, err := h.Store.GetTemplate(r.PathValue("id"))
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	t, err := db.GetTemplate(r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -74,12 +86,16 @@ func (h *Templates) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update patches a template.
 func (h *Templates) Update(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermTemplatesManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 		Body string `json:"body"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	t, err := h.Store.UpdateTemplate(r.PathValue("id"), body.Name, body.Body)
+	t, err := db.UpdateTemplate(r.PathValue("id"), body.Name, body.Body)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -89,7 +105,11 @@ func (h *Templates) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a template.
 func (h *Templates) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.DeleteTemplate(r.PathValue("id")); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, store.PermTemplatesManage)
+	if !ok {
+		return
+	}
+	if err := db.DeleteTemplate(r.PathValue("id")); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
@@ -104,7 +124,11 @@ func (h *Templates) Delete(w http.ResponseWriter, r *http.Request) {
 
 // Duplicate clones a template.
 func (h *Templates) Duplicate(w http.ResponseWriter, r *http.Request) {
-	t, err := h.Store.DuplicateTemplate(r.PathValue("id"))
+	_, db, ok := Authorize(h.Store, w, r, store.PermTemplatesManage)
+	if !ok {
+		return
+	}
+	t, err := db.DuplicateTemplate(r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -114,7 +138,11 @@ func (h *Templates) Duplicate(w http.ResponseWriter, r *http.Request) {
 
 // Rows renders the template table fragment.
 func (h *Templates) Rows(w http.ResponseWriter, r *http.Request) {
-	data, err := h.Store.ListTemplates()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, err := db.ListTemplates()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return

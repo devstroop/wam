@@ -37,8 +37,15 @@ func (db *DB) CreateTemplate(name, body, category, language string) (*Template, 
 		language = "en"
 	}
 	t := &Template{ID: uuid.NewString(), Name: name, Body: body, Category: category, Language: language}
-	if _, err := db.Exec(`INSERT INTO templates (id, name, category, language, body) VALUES (?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.Category, t.Language, t.Body); err != nil {
+	var err error
+	if db.IsPostgres() {
+		_, err = db.Exec(`INSERT INTO templates (id, name, category, language, body, org_id) VALUES (?, ?, ?, ?, ?, ?)`,
+			t.ID, t.Name, t.Category, t.Language, t.Body, db.orgOr(DefaultOrgID))
+	} else {
+		_, err = db.Exec(`INSERT INTO templates (id, name, category, language, body) VALUES (?, ?, ?, ?, ?)`,
+			t.ID, t.Name, t.Category, t.Language, t.Body)
+	}
+	if err != nil {
 		if isUniqueErr(err) {
 			return nil, fmt.Errorf("template name already exists")
 		}

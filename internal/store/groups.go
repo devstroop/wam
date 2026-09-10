@@ -23,7 +23,14 @@ func (db *DB) CreateGroup(name, color string) (*Group, error) {
 		return nil, fmt.Errorf("invalid group name")
 	}
 	g := &Group{ID: uuid.NewString(), Name: name, Color: strings.TrimSpace(color)}
-	if _, err := db.Exec(`INSERT INTO groups (id, name, color) VALUES (?, ?, ?)`, g.ID, g.Name, g.Color); err != nil {
+	var err error
+	if db.IsPostgres() {
+		_, err = db.Exec(`INSERT INTO groups (id, name, color, org_id) VALUES (?, ?, ?, ?)`,
+			g.ID, g.Name, g.Color, db.orgOr(DefaultOrgID))
+	} else {
+		_, err = db.Exec(`INSERT INTO groups (id, name, color) VALUES (?, ?, ?)`, g.ID, g.Name, g.Color)
+	}
+	if err != nil {
 		if isUniqueErr(err) {
 			return nil, fmt.Errorf("group name already exists")
 		}

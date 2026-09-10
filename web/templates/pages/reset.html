@@ -1,0 +1,19 @@
+{{define "content"}}
+<section class="card" style="max-width:24rem;margin:3rem auto">
+  <div class="card-head" style="align-items:center;text-align:center">
+    <span class="brand-mark" style="width:2.5rem;height:2.5rem">{{template "icon-msg"}}</span>
+    <p class="card-title">Set a new password</p>
+  </div>
+  <div class="card-body">
+    {{if .Error}}<div role="alert" class="alert alert-destructive" style="margin-bottom:1rem">{{template "icon-alert"}}<div class="alert-title">Reset failed</div>
+      <div class="alert-desc">The link expired or was already used.</div>
+    </div>{{end}}
+    <form method="post" action="/reset">
+      <input type="hidden" name="token" value="{{.Token}}" />
+      <div class="form-row"><label class="label" for="pw">New password</label><input id="pw" class="input" name="password"
+          type="password" placeholder="8+ characters" autocomplete="new-password" required /></div>
+      <button class="btn btn-block" type="submit">Reset password</button>
+    </form>
+  </div>
+</section>
+{{end}}

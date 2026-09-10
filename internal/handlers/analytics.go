@@ -18,7 +18,11 @@ type Analytics struct {
 
 // Overview returns account-wide aggregates + 14-day timeline.
 func (h *Analytics) Overview(w http.ResponseWriter, r *http.Request) {
-	o, err := h.Store.Overview()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	o, err := db.Overview()
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -28,7 +32,11 @@ func (h *Analytics) Overview(w http.ResponseWriter, r *http.Request) {
 
 // Rows renders one table row per campaign with its funnel.
 func (h *Analytics) Rows(w http.ResponseWriter, r *http.Request) {
-	data, _, err := h.Store.ListCampaigns(50, "")
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, _, err := db.ListCampaigns(50, "")
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -38,7 +46,11 @@ func (h *Analytics) Rows(w http.ResponseWriter, r *http.Request) {
 
 // Chart renders the 14-day timeline fragment.
 func (h *Analytics) Chart(w http.ResponseWriter, r *http.Request) {
-	o, err := h.Store.Overview()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	o, err := db.Overview()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -49,12 +61,16 @@ func (h *Analytics) Chart(w http.ResponseWriter, r *http.Request) {
 // Export downloads all recipients of a campaign as CSV.
 func (h *Analytics) Export(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	c, err := h.Store.GetCampaign(id)
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	c, err := db.GetCampaign(id)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	rows, err := h.Store.ExportRows(id)
+	rows, err := db.ExportRows(id)
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
