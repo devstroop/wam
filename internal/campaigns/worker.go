@@ -1,48 +1,79 @@
-// Package campaigns runs the sender worker: it promotes due
-// scheduled campaigns to sending, then dispatches queued recipients in small
-// batches with per-message rendering ({{name}}, {{phone}}), pause/cancel
-// checks between sends, and receipt-driven delivered/read upgrades.
+// Package campaigns runs the sender worker: it promotes due scheduled
+// campaigns to sending, then dispatches queued recipients with per-message
+// rendering ({{name}}, {{phone}}), pause/cancel checks, retries with
+// backoff, and receipt-driven delivered/read upgrades.
+//
+// Postgres path: durable send_outbox queue (enqueue on launch, SKIP LOCKED
+// claims per org+account, crash-safe locks, DLQ after MaxAttempts).
+// SQLite path: legacy direct-recipient loop (unchanged single-tenant flow).
 package campaigns
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/wa"
 )
 
-// Worker is the only sender (one account → no distributed lock needed).
+// MessageSender delivers one text. *wa.Manager satisfies it; tests fake it.
+type MessageSender interface {
+	SendText(ctx context.Context, accountID, jid, text string) (string, error)
+}
+
+// minSendInterval paces sends per account (Manager's 30/min bucket backstops).
+const minSendInterval = time.Second
+
+// Worker is the only sender (single-flight per process; SKIP LOCKED claims
+// keep future horizontal workers safe).
 // app is the runtime handle: every tenant read/write runs inside WithOrg on
 // it (fail-closed RLS). owner is privileged and used ONLY for org
 // enumeration and msgID→org resolution (receipt routing); on SQLite both are
 // the same handle.
 type Worker struct {
-	app   *store.DB
-	owner *store.DB
-	wa    *wa.Manager
-	log   *slog.Logger
-	tick  time.Duration
-	batch int
-	stop  chan struct{}
-	done  chan struct{}
+	app      *store.DB
+	owner    *store.DB
+	wa       MessageSender
+	log      *slog.Logger
+	tick     time.Duration
+	batch    int
+	workerID string
+	stop     chan struct{}
+	done     chan struct{}
+
+	paceMu   sync.Mutex
+	lastSent map[string]time.Time
 }
 
-// New builds the worker (not started).
-func New(app, owner *store.DB, w *wa.Manager, log *slog.Logger) *Worker {
+// New builds the worker (not started). Receipts wire via OnReceipt.
+func New(app, owner *store.DB, w MessageSender, log *slog.Logger) *Worker {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Worker{app: app, owner: owner, wa: w, log: log, tick: 5 * time.Second, batch: 5, stop: make(chan struct{}), done: make(chan struct{})}
+	return &Worker{
+		app: app, owner: owner, wa: w, log: log,
+		tick: 5 * time.Second, batch: 10,
+		workerID: fmt.Sprintf("%s-%d", hostname(), os.Getpid()),
+		stop:     make(chan struct{}), done: make(chan struct{}),
+		lastSent: map[string]time.Time{},
+	}
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "wam"
+	}
+	return h
 }
 
 // Start launches the loop; Stop blocks until it exits.
 func (w *Worker) Start() {
-	w.wa.OnReceipt = func(accountID string, msgIDs []string, status string) {
-		w.onReceipt(accountID, msgIDs, status)
-	}
 	go w.loop()
 }
 
@@ -50,6 +81,29 @@ func (w *Worker) Start() {
 func (w *Worker) Stop() {
 	close(w.stop)
 	<-w.done
+}
+
+// OnReceipt upgrades sent → delivered/read by WhatsApp message id. Wire to
+// Manager.OnReceipt. The org is resolved via the owner handle first
+// (fail-closed RLS hides the mapping from unscoped app handles).
+func (w *Worker) OnReceipt(accountID string, msgIDs []string, status string) {
+	_ = accountID // msgIDs are device-unique; org scoping below is sufficient
+	for _, id := range msgIDs {
+		w.onReceipt(id, status)
+	}
+}
+
+func (w *Worker) onReceipt(msgID, status string) {
+	orgID, ok := w.owner.OrgForMsgID(msgID)
+	if !ok {
+		return
+	}
+	if err := w.app.WithOrg(context.Background(), orgID, func(odb *store.DB) error {
+		_, _ = odb.MarkByMsgID(msgID, status)
+		return nil
+	}); err != nil {
+		w.log.Warn("campaigns: receipt update failed", "msg", msgID, "err", err)
+	}
 }
 
 func (w *Worker) loop() {
@@ -74,7 +128,11 @@ func (w *Worker) runOnce() {
 	}
 	for _, orgID := range orgs {
 		if err := w.app.WithOrg(context.Background(), orgID, func(odb *store.DB) error {
-			w.runOnceForOrg(odb)
+			if odb.IsPostgres() {
+				w.runQueueForOrg(odb, orgID)
+			} else {
+				w.runLegacyForOrg(odb)
+			}
 			return nil
 		}); err != nil {
 			w.log.Warn("campaigns: org run failed", "org", orgID, "err", err)
@@ -82,7 +140,180 @@ func (w *Worker) runOnce() {
 	}
 }
 
-func (w *Worker) runOnceForOrg(db *store.DB) {
+// --- Postgres queue path ---
+
+func (w *Worker) runQueueForOrg(db *store.DB, orgID string) {
+	now := time.Now()
+	// Promote due schedules (LaunchCampaign also enqueues the audience).
+	due, err := db.DueScheduled(now)
+	if err != nil {
+		w.log.Warn("campaigns: due query failed", "err", err)
+		return
+	}
+	for _, id := range due {
+		if _, err := db.LaunchCampaign(id); err != nil {
+			w.log.Warn("campaigns: launch failed", "id", id, "err", err)
+			continue
+		}
+		w.log.Info("campaigns: scheduled -> sending", "id", id)
+	}
+
+	// Accounts to drain: every org account plus the NULL pin (legacy rows).
+	accounts, err := db.AccountsByOrg(orgID)
+	if err != nil {
+		w.log.Warn("campaigns: account list failed", "err", err)
+		return
+	}
+	pins := make([]string, 0, len(accounts)+1)
+	for _, a := range accounts {
+		pins = append(pins, a.ID)
+	}
+	pins = append(pins, "") // NULL-pinned legacy rows
+
+	skipped := map[string]bool{} // campaigns paused/cancelled this tick
+	for _, pin := range pins {
+		jobs, err := db.ClaimJobs(orgID, pin, w.batch, w.workerID, now)
+		if err != nil {
+			w.log.Warn("campaigns: claim failed", "err", err)
+			continue
+		}
+		for _, job := range jobs {
+			if skipped[job.CampaignID] {
+				_ = db.ReleaseJob(job.ID)
+				continue
+			}
+			status, err := db.CampaignStatus(job.CampaignID)
+			if err != nil || status != store.CampaignSending {
+				w.handleStalled(db, job.CampaignID, job.ID, status)
+				if status == store.CampaignPaused {
+					skipped[job.CampaignID] = true
+				}
+				continue
+			}
+			w.sendJob(db, job)
+		}
+	}
+
+	// Finish sending campaigns with neither queued recipients nor jobs.
+	sending, err := db.SendingCampaigns()
+	if err != nil {
+		return
+	}
+	for _, id := range sending {
+		f, err := db.RecipientFunnel(id)
+		if err != nil {
+			continue
+		}
+		if f.Queued != 0 {
+			continue
+		}
+		n, err := db.OutboxCountByCampaign(id)
+		if err != nil || n != 0 {
+			continue
+		}
+		if _, err := db.SetCampaignStatus(id, store.CampaignDone); err == nil {
+			w.log.Info("campaigns: sending -> done", "id", id,
+				"sent", f.Sent+f.Delivered+f.Read+f.Replied, "failed", f.Failed)
+		}
+	}
+}
+
+// handleStalled drops jobs for dead campaigns, releases paused ones.
+func (w *Worker) handleStalled(db *store.DB, campaignID, jobID, status string) {
+	switch status {
+	case store.CampaignPaused:
+		// Resume reclaims via lock expiry or explicit release; release now
+		// so resume picks up without waiting out LockTimeout.
+		_ = db.ReleaseCampaignJobs(campaignID)
+	default:
+		// Cancelled/done/missing: job is garbage.
+		_ = db.AckJob(jobID)
+	}
+}
+
+func (w *Worker) sendJob(db *store.DB, job store.OutboxJob) {
+	accountID := job.AccountID
+	if accountID == "" {
+		// Legacy pin: sole-account fallback, never a guess.
+		accounts, err := db.AccountsByOrg(job.OrgID)
+		if err != nil {
+			return
+		}
+		if accountID = store.ResolveDefaultAccount(accounts); accountID == "" {
+			w.log.Warn("campaigns: no sendable account", "campaign", job.CampaignID)
+			_ = db.ReleaseJob(job.ID)
+			return
+		}
+	}
+	if job.Phone == "" {
+		// Contact deleted mid-flight: drop.
+		_ = db.AckJob(job.ID)
+		return
+	}
+	w.pace(accountID)
+	text := render(dbCampaignBody(db, job.CampaignID), job.Name, job.Phone)
+	jid := wa.JIDForPhone(job.Phone)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	msgID, err := w.wa.SendText(ctx, accountID, jid, text)
+	cancel()
+	if err == nil {
+		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecSent, msgID, "")
+		_ = db.AckJob(job.ID)
+		return
+	}
+	if isPermanent(err) {
+		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecFailed, "", shortErr(err))
+		_ = db.AckJob(job.ID)
+		w.log.Warn("campaigns: send failed (permanent)", "campaign", job.CampaignID, "contact", job.ContactID, "err", err)
+		return
+	}
+	attempts := job.Attempts + 1
+	if attempts >= store.MaxAttempts {
+		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecFailed, "", shortErr(err))
+		_ = db.AckJob(job.ID)
+		w.log.Warn("campaigns: send failed (exhausted)", "campaign", job.CampaignID, "contact", job.ContactID, "err", err)
+		return
+	}
+	_ = db.RetryJob(job.ID, attempts, time.Now())
+	w.log.Warn("campaigns: send failed (retrying)", "campaign", job.CampaignID, "contact", job.ContactID, "attempt", attempts, "err", err)
+}
+
+// dbCampaignBody loads the template (warns + empty on failure: send still
+// records an attempt rather than wedging the queue).
+func dbCampaignBody(db *store.DB, campaignID string) string {
+	body, err := db.CampaignBody(campaignID)
+	if err != nil {
+		return ""
+	}
+	return body
+}
+
+// pace enforces minSendInterval per account (Manager bucket backstops).
+func (w *Worker) pace(accountID string) {
+	w.paceMu.Lock()
+	defer w.paceMu.Unlock()
+	if last, ok := w.lastSent[accountID]; ok {
+		if wait := minSendInterval - time.Since(last); wait > 0 {
+			time.Sleep(wait)
+		}
+	}
+	w.lastSent[accountID] = time.Now()
+}
+
+// isPermanent classifies errors that retries cannot heal.
+func isPermanent(err error) bool {
+	s := err.Error()
+	for _, sub := range []string{"not on WhatsApp", "invalid phone", "invalid jid"} {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Legacy SQLite path (unchanged single-tenant loop) ---
+
+func (w *Worker) runLegacyForOrg(db *store.DB) {
 	now := time.Now()
 	due, err := db.DueScheduled(now)
 	if err != nil {
@@ -99,11 +330,6 @@ func (w *Worker) runOnceForOrg(db *store.DB) {
 
 	id, ok := db.NextSending()
 	if !ok {
-		return
-	}
-	accountID, _ := w.resolveAccount(db, id)
-	if accountID == "" {
-		w.log.Warn("campaigns: no sendable account", "id", id)
 		return
 	}
 	body, err := db.CampaignBody(id)
@@ -134,72 +360,23 @@ func (w *Worker) runOnceForOrg(db *store.DB) {
 		if err != nil || status != store.CampaignSending {
 			return // paused / cancelled / done mid-batch
 		}
-		w.sendOne(db, accountID, id, body, r)
+		w.sendLegacy(db, id, body, r)
 		time.Sleep(time.Second)
 	}
 }
 
-// resolveAccount maps a campaign to its sender (accountID, deviceJID).
-// Legacy/NULL pins fall back to the org's sole account; ambiguity or no
-// account yields "" (caller skips with a warning, never guesses).
-func (w *Worker) resolveAccount(db *store.DB, campaignID string) (string, string) {
-	if !db.IsPostgres() {
-		return store.LegacyAccountID, ""
-	}
-	accountID, deviceJID, err := db.AccountForCampaign(campaignID)
-	if err != nil {
-		w.log.Warn("campaigns: account lookup failed", "id", campaignID, "err", err)
-		return "", ""
-	}
-	if accountID != "" {
-		return accountID, deviceJID
-	}
-	accounts, err := db.AccountsByOrg(db.OrgID())
-	if err != nil {
-		w.log.Warn("campaigns: account list failed", "id", campaignID, "err", err)
-		return "", ""
-	}
-	if d := store.ResolveDefaultAccount(accounts); d != "" {
-		for _, a := range accounts {
-			if a.ID == d {
-				return a.ID, a.DeviceJID
-			}
-		}
-	}
-	return "", ""
-}
-
-func (w *Worker) sendOne(db *store.DB, accountID, campaignID, body string, r store.Recipient) {
+func (w *Worker) sendLegacy(db *store.DB, campaignID, body string, r store.Recipient) {
 	text := render(body, r.Name, r.Phone)
 	jid := wa.JIDForPhone(r.Phone)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	msgID, err := w.wa.SendText(ctx, accountID, jid, text)
+	msgID, err := w.wa.SendText(ctx, store.LegacyAccountID, jid, text)
 	if err != nil {
 		_ = db.MarkRecipient(campaignID, r.ContactID, store.RecFailed, "", shortErr(err))
 		w.log.Warn("campaigns: send failed", "campaign", campaignID, "contact", r.ContactID, "err", err)
 		return
 	}
 	_ = db.MarkRecipient(campaignID, r.ContactID, store.RecSent, msgID, "")
-}
-
-// onReceipt upgrades sent → delivered/read by WhatsApp message id. The org is
-// resolved via the owner handle first (fail-closed RLS hides the mapping
-// from unscoped app handles), then the update runs org-scoped.
-func (w *Worker) onReceipt(accountID string, msgIDs []string, status string) {
-	_ = accountID // msgIDs are device-unique; org scoping below is sufficient
-	for _, id := range msgIDs {
-		orgID, ok := w.owner.OrgForMsgID(id)
-		if !ok {
-			continue
-		}
-		if err := w.app.WithOrg(context.Background(), orgID, func(odb *store.DB) error {
-			_, _ = odb.MarkByMsgID(id, status)
-			return nil
-		}); err != nil {
-			w.log.Warn("campaigns: receipt update failed", "msg", id, "err", err)
-		}
-	}
 }
 
 // render substitutes {{name}} and {{phone}} (unknown vars left as-is).
