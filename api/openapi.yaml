@@ -52,6 +52,8 @@ tags:
     description: Team + per-account grants (admin, members:manage).
   - name: Accounts
     description: WhatsApp numbers per org (pair independently; campaigns pin one).
+  - name: Billing
+    description: Plans, derived usage, subscriptions, invoices (PG SaaS path).
 paths:
   /healthz:
     get:
@@ -984,8 +986,46 @@ paths:
           schema: { type: string }
       responses:
         '204': { description: Removed }
-  /api/v1/grants:
+  /api/v1/billing/plan:
     get:
+      tags: [Billing]
+      operationId: getBillingPlan
+      summary: Effective plan + derived usage (+ subscription)
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/billing/plans:
+    get:
+      tags: [Billing]
+      operationId: listBillingPlans
+      summary: Tiers cheapest-first
+      responses:
+        '200': { description: OK }
+  /api/v1/billing/subscription:
+    post:
+      tags: [Billing]
+      operationId: setSubscription
+      summary: Switch tier as trial (admin, billing:manage; paid activation via gateway webhook)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_id]
+              properties:
+                plan_id: { type: string }
+      responses:
+        '200': { description: OK }
+        '403': { description: Missing billing:manage }
+  /api/v1/billing/invoices:
+    get:
+      tags: [Billing]
+      operationId: listInvoices
+      summary: Charges newest-first
+      responses:
+        '200': { description: OK }
+  /api/v1/grants:    get:
       tags: [Members]
       operationId: listGrants
       summary: Account grants for a member (?user_id=, admin)
@@ -1297,6 +1337,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     Unauthorized:
       description: Login required
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PaymentRequired:
+      description: Plan quota exceeded (upgrade)
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

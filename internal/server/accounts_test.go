@@ -88,13 +88,13 @@ func TestAccountsHTTPAccess(t *testing.T) {
 		return v.ID
 	}
 
-	// 1. Admin creates two accounts.
+	// 1. Admin creates one account (free tier allows 1); second → 402.
 	rec, _ = doReq(t, h, "POST", "/api/v1/accounts", `{"label":"Sales"}`, adminCookie)
 	mustStatus(t, rec, http.StatusCreated, "create A")
 	acctA := decodeID(rec)
 	rec, _ = doReq(t, h, "POST", "/api/v1/accounts", `{"label":"Support"}`, adminCookie)
-	mustStatus(t, rec, http.StatusCreated, "create B")
-	acctB := decodeID(rec)
+	mustStatus(t, rec, http.StatusPaymentRequired, "create B over quota")
+	acctB := "00000000-0000-0000-0000-000000000000"
 
 	// 2. Member sees none, gets 404 on direct fetch.
 	rec, _ = doReq(t, h, "GET", "/api/v1/accounts", "", memberCookie)
@@ -122,8 +122,7 @@ func TestAccountsHTTPAccess(t *testing.T) {
 	rec, _ = doReq(t, h, "POST", "/api/v1/accounts", `{"label":"Nope"}`, memberCookie)
 	mustStatus(t, rec, http.StatusForbidden, "member create")
 
-	// 5. Campaign create: explicit ungranted account → 400; granted-viewer
-	// drafts → 201 (view access drafts, only sending needs use).
+	// 5. Campaign create: unknown account → 400; granted-viewer drafts → 201.
 	rec, _ = doReq(t, h, "POST", "/api/v1/campaigns",
 		fmt.Sprintf(`{"name":"c1","bodyTemplate":"hi","wa_account_id":%q}`, acctB), memberCookie)
 	mustStatus(t, rec, http.StatusBadRequest, "campaign ungranted account")
@@ -148,11 +147,11 @@ func TestAccountsHTTPAccess(t *testing.T) {
 	rec, _ = doReq(t, h, "DELETE", "/api/v1/campaigns/"+camp.ID, "", adminCookie)
 	mustStatus(t, rec, http.StatusNoContent, "delete campaign")
 
-	// 6. Admin deletes B (no grants/campaigns on it) → 204.
-	rec, _ = doReq(t, h, "DELETE", "/api/v1/accounts/"+acctB, "", adminCookie)
-	mustStatus(t, rec, http.StatusNoContent, "delete B")
+	// 6. Admin deletes A → 204 (grants cascade; covered store-level).
+	rec, _ = doReq(t, h, "DELETE", "/api/v1/accounts/"+acctA, "", adminCookie)
+	mustStatus(t, rec, http.StatusNoContent, "delete A")
 
-	// 7. Legacy single-account route resolves the sole remaining account.
+	// 7. No accounts left: legacy route asks to pair (400).
 	rec, _ = doReq(t, h, "GET", "/api/v1/connection", "", adminCookie)
-	mustStatus(t, rec, http.StatusOK, "legacy status resolves")
+	mustStatus(t, rec, http.StatusBadRequest, "legacy status empty")
 }

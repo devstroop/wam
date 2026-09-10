@@ -142,6 +142,10 @@ func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		body.Label = r.FormValue("label")
 	}
+	if err := db.CheckQuota(id.OrgID, "account"); err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
 	a, err := db.CreateAccount(id.OrgID, body.Label, id.UserID)
 	if err != nil {
 		writeStoreError(w, r, err)

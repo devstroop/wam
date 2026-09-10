@@ -162,11 +162,33 @@ func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conn := h.connBadge(id, db)
+	var billing map[string]any
+	if db != nil && db.IsPostgres() {
+		if plan, err := db.EffectivePlan(id.OrgID); err == nil {
+			if usage, err := db.UsageForOrg(id.OrgID); err == nil {
+				lim := func(n int) any {
+					if n < 0 {
+						return "∞"
+					}
+					return n
+				}
+				billing = map[string]any{
+					"PlanName": plan.Name,
+					"Rows": []map[string]any{
+						{"Label": "Messages this month", "Used": usage.MsgsThisMonth, "Limit": lim(plan.Limits.MsgsPerMonth)},
+						{"Label": "Contacts", "Used": usage.Contacts, "Limit": lim(plan.Limits.Contacts)},
+						{"Label": "WhatsApp numbers", "Used": usage.Accounts, "Limit": lim(plan.Limits.Accounts)},
+						{"Label": "Members", "Used": usage.Members, "Limit": lim(plan.Limits.Members)},
+					},
+				}
+			}
+		}
+	}
 	h.Views.RenderApp(w, "settings.html", map[string]any{
 		"Title": "Settings", "Nav": "settings",
 		"Contacts": contacts, "Groups": groups,
 		"Campaigns": campaigns, "Templates": templates,
-		"Conn": conn,
+		"Conn": conn, "Billing": billing,
 	})
 }
 

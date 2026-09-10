@@ -32,6 +32,10 @@ func (h *Messaging) resolveSender(w http.ResponseWriter, r *http.Request) (strin
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
 		return "", false
 	}
+	if err := db.CheckQuota(id.OrgID, "message"); err != nil {
+		writeStoreError(w, r, err)
+		return "", false
+	}
 	return aid, true
 }
 

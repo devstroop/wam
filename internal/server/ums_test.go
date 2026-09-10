@@ -87,6 +87,11 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("GET /api/v1/connection", conn.Status)
 	mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 	mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
+	billing := &handlers.Billing{Store: app}
+	mux.HandleFunc("GET /api/v1/billing/plan", billing.Overview)
+	mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
+	mux.HandleFunc("POST /api/v1/billing/subscription", billing.SetSubscription)
+	mux.HandleFunc("GET /api/v1/billing/invoices", billing.Invoices)
 	return sess.RequireUMS(app, nil)(mux), mailer
 }
 

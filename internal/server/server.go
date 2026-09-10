@@ -154,6 +154,11 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 		mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
 		mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 		mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
+		billing := &handlers.Billing{Store: db}
+		mux.HandleFunc("GET /api/v1/billing/plan", billing.Overview)
+		mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
+		mux.HandleFunc("POST /api/v1/billing/subscription", billing.SetSubscription)
+		mux.HandleFunc("GET /api/v1/billing/invoices", billing.Invoices)
 	} else {
 		mux.HandleFunc("GET /login", authH.LoginPage)
 		mux.HandleFunc("POST /login", authH.LoginSubmit)
