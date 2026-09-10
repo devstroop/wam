@@ -85,6 +85,8 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("POST /api/v1/accounts/{id}/pair", accts.Pair)
 	mux.HandleFunc("POST /api/v1/accounts/{id}/logout", accts.Logout)
 	mux.HandleFunc("GET /api/v1/connection", conn.Status)
+	mux.HandleFunc("GET /partials/connect-dialog", conn.Dialog)
+	mux.HandleFunc("GET /partials/account-menu", ums.AccountMenu)
 	mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 	mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
 	billing := &handlers.Billing{Store: app}
@@ -92,7 +94,7 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
 	mux.HandleFunc("POST /api/v1/billing/subscription", billing.SetSubscription)
 	mux.HandleFunc("GET /api/v1/billing/invoices", billing.Invoices)
-	ops := &handlers.Ops{Store: app}
+	ops := &handlers.Ops{Store: app, Views: v}
 	mux.HandleFunc("GET /api/v1/audit", ops.AuditList)
 	mux.HandleFunc("GET /api/v1/keys", ops.ListKeys)
 	mux.HandleFunc("POST /api/v1/keys", ops.CreateKey)

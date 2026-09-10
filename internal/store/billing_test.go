@@ -11,8 +11,19 @@ func TestBillingPlans(t *testing.T) {
 	owner, _ := umsHandles(t)
 
 	plans, err := owner.ListPlans()
-	if err != nil || len(plans) != 4 {
-		t.Fatalf("plans = %v %v", plans, err)
+	if err != nil {
+		t.Fatalf("plans: %v", err)
+	}
+	// Assert seed tiers exist (exact count is racy: other packages share
+	// this dev DB and may hold temp plans concurrently).
+	byCode := map[string]Plan{}
+	for _, p := range plans {
+		byCode[p.Code] = p
+	}
+	for _, code := range []string{"free", "starter", "growth", "scale"} {
+		if _, ok := byCode[code]; !ok {
+			t.Fatalf("missing seed plan %s (have %v)", code, byCode)
+		}
 	}
 	free, err := owner.GetPlan("free")
 	if err != nil || free.Limits.Contacts != 500 || free.Limits.MsgsPerMonth != 1000 {

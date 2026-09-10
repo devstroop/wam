@@ -213,6 +213,56 @@ func TestCampaignAccount(t *testing.T) {
 	}
 }
 
+// TestEnsurePairingAccount covers first-pair auto-creation and ambiguity.
+func TestEnsurePairingAccount(t *testing.T) {
+	owner, _ := umsHandles(t)
+
+	org, err := owner.CreateOrg("Pairing Test Co")
+	if err != nil {
+		t.Fatalf("org: %v", err)
+	}
+	t.Cleanup(func() { _, _ = owner.Exec(`DELETE FROM orgs WHERE id = ?`, org.ID) })
+
+	// Zero accounts → creates pending row.
+	a, err := owner.EnsurePairingAccount(org.ID, "", "admin-1")
+	if err != nil || a.Label != "My WhatsApp number" || a.Status != AccountPending {
+		t.Fatalf("auto-create = %+v %v", a, err)
+	}
+	t.Cleanup(func() { _, _ = owner.Exec(`DELETE FROM wa_accounts WHERE org_id = ?`, org.ID) })
+	// Sole account → reused, no duplicate.
+	b, err := owner.EnsurePairingAccount(org.ID, "", "admin-1")
+	if err != nil || b.ID != a.ID {
+		t.Fatalf("reuse = %+v %v", b, err)
+	}
+	// Explicit id → validated.
+	if _, err := owner.EnsurePairingAccount(org.ID, a.ID, ""); err != nil {
+		t.Fatalf("explicit = %v", err)
+	}
+	if _, err := owner.EnsurePairingAccount(org.ID, "no-such-account", ""); err == nil {
+		t.Fatal("unknown explicit id allowed")
+	}
+	// Second account → ambiguity errors.
+	if _, err := owner.CreateAccount(org.ID, "Second", ""); err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if _, err := owner.EnsurePairingAccount(org.ID, "", ""); err == nil {
+		t.Fatal("ambiguous default allowed")
+	}
+	// Explicit still resolves under ambiguity.
+	if _, err := owner.EnsurePairingAccount(org.ID, a.ID, ""); err != nil {
+		t.Fatalf("explicit under ambiguity = %v", err)
+	}
+	// SQLite refuses (no table).
+	sqlite, err := OpenSQLite(t.TempDir() + "/pair.db")
+	if err != nil {
+		t.Fatalf("sqlite: %v", err)
+	}
+	defer sqlite.Close()
+	if _, err := sqlite.EnsurePairingAccount("x", "", ""); err == nil {
+		t.Fatal("sqlite allowed")
+	}
+}
+
 var digitCounter = 10000
 
 func randomDigits() string {

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devstroop/wam/internal/middleware"
 	"github.com/devstroop/wam/internal/store"
+	"github.com/devstroop/wam/internal/views"
 	"github.com/devstroop/wam/internal/wa"
 )
 
@@ -17,6 +19,7 @@ var startedAt = time.Now()
 // Ops serves API keys, outbound webhooks, audit trail and metrics.
 type Ops struct {
 	Store *store.DB
+	Views *views.Views
 	WA    *wa.Manager
 }
 
@@ -59,9 +62,16 @@ func (h *Ops) CreateKey(w http.ResponseWriter, r *http.Request) {
 		Scopes    []string `json:"scopes"`
 		ExpiresAt string   `json:"expires_at"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body")
-		return
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body")
+			return
+		}
+	} else {
+		_ = r.ParseForm()
+		body.Name = r.FormValue("name")
+		body.Scopes = r.Form["scopes"]
+		body.ExpiresAt = r.FormValue("expires_at")
 	}
 	if len(body.Scopes) == 0 {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "scopes required")
@@ -93,6 +103,11 @@ func (h *Ops) CreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Audit(db, id, "keys.create", "api_key", key.ID)
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Trigger", `{"toast":"API key created — copy it now"}`)
+		h.Views.RenderPartial(w, "key-created", map[string]any{"Token": raw, "Prefix": key.Prefix})
+		return
+	}
 	WriteJSON(w, http.StatusCreated, map[string]any{"key": key, "token": raw})
 }
 
@@ -121,6 +136,12 @@ func (h *Ops) RevokeKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Audit(db, id, "keys.revoke", "api_key", r.PathValue("id"))
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Trigger", `{"toast":"API key revoked"}`)
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -137,9 +158,20 @@ func (h *Ops) CreateEndpoint(w http.ResponseWriter, r *http.Request) {
 		Secret string   `json:"secret"`
 		Events []string `json:"events"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
-		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "url is required")
-		return
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "url is required")
+			return
+		}
+	} else {
+		_ = r.ParseForm()
+		body.URL = r.FormValue("url")
+		body.Secret = r.FormValue("secret")
+		body.Events = r.Form["events"]
+		if body.URL == "" {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "url is required")
+			return
+		}
 	}
 	e, err := db.CreateEndpoint(id.OrgID, body.URL, body.Secret, body.Events, id.UserID)
 	if err != nil {
@@ -147,6 +179,12 @@ func (h *Ops) CreateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Audit(db, id, "webhooks.create", "webhook_endpoint", e.ID)
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Trigger", `{"toast":"Webhook added"}`)
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusCreated)
+		return
+	}
 	WriteJSON(w, http.StatusCreated, e)
 }
 
@@ -175,6 +213,12 @@ func (h *Ops) DeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Audit(db, id, "webhooks.delete", "webhook_endpoint", r.PathValue("id"))
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Trigger", `{"toast":"Webhook deleted"}`)
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
