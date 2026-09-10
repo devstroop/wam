@@ -92,6 +92,15 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
 	mux.HandleFunc("POST /api/v1/billing/subscription", billing.SetSubscription)
 	mux.HandleFunc("GET /api/v1/billing/invoices", billing.Invoices)
+	ops := &handlers.Ops{Store: app}
+	mux.HandleFunc("GET /api/v1/audit", ops.AuditList)
+	mux.HandleFunc("GET /api/v1/keys", ops.ListKeys)
+	mux.HandleFunc("POST /api/v1/keys", ops.CreateKey)
+	mux.HandleFunc("DELETE /api/v1/keys/{id}", ops.RevokeKey)
+	mux.HandleFunc("GET /api/v1/webhooks", ops.ListEndpoints)
+	mux.HandleFunc("POST /api/v1/webhooks", ops.CreateEndpoint)
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", ops.DeleteEndpoint)
+	mux.HandleFunc("GET /metrics", ops.Metrics)
 	return sess.RequireUMS(app, nil)(mux), mailer
 }
 
@@ -158,6 +167,7 @@ func TestUMSHTTPEndToEnd(t *testing.T) {
 			t.Logf("cleanup user %s: %v", email, err)
 		}
 		for _, m := range ms {
+			_, _ = owner.Exec(`DELETE FROM audit_logs WHERE org_id = ?`, m.OrgID)
 			if n, _ := owner.MembersByOrg(m.OrgID); len(n) == 0 {
 				if _, err := owner.Exec(`DELETE FROM orgs WHERE id = ? AND id != 'org_default'`, m.OrgID); err != nil {
 					t.Logf("cleanup org %s: %v", m.OrgID, err)

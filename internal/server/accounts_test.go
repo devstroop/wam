@@ -39,6 +39,7 @@ func TestAccountsHTTPAccess(t *testing.T) {
 			ms, _ := owner.MembershipsByUser(u.ID)
 			_, _ = owner.Exec(`DELETE FROM users WHERE id = ?`, u.ID)
 			for _, m := range ms {
+				_, _ = owner.Exec(`DELETE FROM audit_logs WHERE org_id = ?`, m.OrgID)
 				if n, _ := owner.MembersByOrg(m.OrgID); len(n) == 0 {
 					_, _ = owner.Exec(`DELETE FROM orgs WHERE id = ? AND id != 'org_default'`, m.OrgID)
 				}

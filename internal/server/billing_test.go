@@ -43,6 +43,7 @@ func TestBillingHTTPQuota(t *testing.T) {
 				_, _ = owner.Exec(`DELETE FROM campaigns WHERE org_id = ?`, m.OrgID)
 				_, _ = owner.Exec(`DELETE FROM contacts WHERE org_id = ?`, m.OrgID)
 				_, _ = owner.Exec(`DELETE FROM wa_accounts WHERE org_id = ?`, m.OrgID)
+				_, _ = owner.Exec(`DELETE FROM audit_logs WHERE org_id = ?`, m.OrgID)
 				if n, _ := owner.MembersByOrg(m.OrgID); len(n) == 0 {
 					_, _ = owner.Exec(`DELETE FROM orgs WHERE id = ? AND id != 'org_default'`, m.OrgID)
 				}

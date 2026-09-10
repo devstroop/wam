@@ -129,7 +129,7 @@ func launchFixtureCampaign(t *testing.T, app *store.DB, orgID, accountID string,
 }
 
 func newTestWorker(app, owner *store.DB, sender MessageSender) *Worker {
-	w := New(app, owner, sender, nil)
+	w := New(app, owner, sender, nil, nil)
 	w.tick = time.Hour // manual ticks only
 	w.batch = 10
 	return w

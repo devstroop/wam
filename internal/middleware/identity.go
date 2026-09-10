@@ -17,6 +17,23 @@ type Identity struct {
 	Role   string // admin | user
 	// Grants maps wa_account_id → grant role for non-admins (admins skip it).
 	Grants map[string]string
+	// KeyID is set for API-key auth (sessions leave it empty).
+	KeyID string
+	// Scopes bound the key (narrowing on top of the role perms).
+	Scopes []string
+}
+
+// KeyAuth reports whether the principal came from a Bearer API key.
+func (id Identity) KeyAuth() bool { return id.KeyID != "" }
+
+// Allows checks perm against key scopes ("*" = all).
+func (id Identity) Allows(perm string) bool {
+	for _, s := range id.Scopes {
+		if s == "*" || s == perm {
+			return true
+		}
+	}
+	return false
 }
 
 // umsCtxKey namespaces UMS context values apart from request_id.go's ctxKey.

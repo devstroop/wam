@@ -54,6 +54,8 @@ tags:
     description: WhatsApp numbers per org (pair independently; campaigns pin one).
   - name: Billing
     description: Plans, derived usage, subscriptions, invoices (PG SaaS path).
+  - name: Ops
+    description: API keys, outbound webhooks, audit trail, metrics.
 paths:
   /healthz:
     get:
@@ -1025,7 +1027,8 @@ paths:
       summary: Charges newest-first
       responses:
         '200': { description: OK }
-  /api/v1/grants:    get:
+  /api/v1/grants:
+    get:
       tags: [Members]
       operationId: listGrants
       summary: Account grants for a member (?user_id=, admin)
@@ -1069,6 +1072,101 @@ paths:
                 account_id: { type: string }
       responses:
         '204': { description: Revoked }
+  /api/v1/audit:
+    get:
+      tags: [Ops]
+      operationId: listAudit
+      summary: Audit trail newest-first (admin)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/keys:
+    get:
+      tags: [Ops]
+      operationId: listKeys
+      summary: API keys, no secrets (admin, keys:manage)
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ops]
+      operationId: createKey
+      summary: Mint credential, raw token shown once (scopes narrow creator perms)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                name: { type: string }
+                scopes: { type: array, items: { type: string } }
+                expires_at: { type: string, format: date-time }
+      responses:
+        '201': { description: Created }
+  /api/v1/keys/{id}:
+    delete:
+      tags: [Ops]
+      operationId: revokeKey
+      summary: Revoke credential (row kept for audit)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Revoked }
+  /api/v1/webhooks:
+    get:
+      tags: [Ops]
+      operationId: listWebhooks
+      summary: Outbound targets, no secrets + event catalog
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Ops]
+      operationId: createWebhook
+      summary: Register https target with event subset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                secret: { type: string, description: HMAC secret for X-Wam-Signature }
+                events:
+                  type: array
+                  items: { type: string, enum: [message.sent, message.delivered, message.read, message.failed, campaign.done] }
+      responses:
+        '201': { description: Created }
+  /api/v1/webhooks/{id}:
+    delete:
+      tags: [Ops]
+      operationId: deleteWebhook
+      summary: Remove target
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+  /metrics:
+    get:
+      tags: [Ops]
+      operationId: getMetrics
+      summary: Prometheus-text gauges (any member; scrape with API key)
+      responses:
+        '200': { description: OK }
 components:
   parameters:
     EntityId:

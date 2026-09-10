@@ -45,7 +45,20 @@ func Authorize(fallback *store.DB, w http.ResponseWriter, r *http.Request, perm 
 		}
 		return middleware.Identity{}, nil, false
 	}
+	// API keys narrow further to their scopes (sessions skip this).
+	if id.KeyAuth() && perm != "" && !id.Allows(perm) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "key scope missing "+perm)
+		return middleware.Identity{}, nil, false
+	}
 	return id, db, true
+}
+
+// Audit appends a trail row (never fails the request; no-op on legacy).
+func Audit(db *store.DB, id middleware.Identity, action, entity, entityID string) {
+	if db == nil || !db.IsPostgres() {
+		return
+	}
+	_ = db.Audit(id.OrgID, id.UserID, id.Email, action, entity, entityID, "")
 }
 
 // WriteProblem writes an RFC 9457 problem+json error.

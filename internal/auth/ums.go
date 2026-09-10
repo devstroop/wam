@@ -60,6 +60,16 @@ func (s *Session) RequireUMS(db *store.DB, log *slog.Logger) func(http.Handler) 
 				}
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 			}
+			// Bearer API keys precede cookies, /api/* only. Explicit bad
+			// credentials fail loudly (no cookie fallback).
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				if raw := bearerToken(r); raw != "" {
+					if !s.serveKey(w, r, db, log, next, raw) {
+						deny()
+					}
+					return
+				}
+			}
 			raw, ok := s.CookieValue(r)
 			if !ok || !s.Valid(r) {
 				deny()
@@ -127,6 +137,78 @@ func (s *Session) RequireUMS(db *store.DB, log *slog.Logger) func(http.Handler) 
 			}
 		})
 	}
+}
+
+// bearerToken extracts a raw Bearer credential, if present.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if h == "" {
+		return ""
+	}
+	parts := strings.SplitN(h, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// serveKey authenticates an API key and runs the request in its org
+// transaction. Returns false after denying (caller must return).
+func (s *Session) serveKey(w http.ResponseWriter, r *http.Request, db *store.DB, log *slog.Logger, next http.Handler, raw string) bool {
+	deny := func() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"title":"Unauthorized","status":401,"detail":"invalid API key"}`))
+	}
+	key, err := db.LookupKey(raw)
+	if err != nil {
+		deny()
+		return false
+	}
+	user, err := db.GetUser(key.UserID)
+	if err != nil {
+		deny()
+		return false
+	}
+	m, err := db.GetMembership(user.ID, key.OrgID)
+	if err != nil {
+		deny()
+		return false
+	}
+	tx, err := db.BeginOrgTx(r.Context(), key.OrgID)
+	if err != nil {
+		log.Warn("ums: key org tx failed", "err", err)
+		deny()
+		return false
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	odb := tx.DB(db.Driver)
+	grants := map[string]string{}
+	if m.Role != store.RoleAdmin {
+		if gs, err := odb.GrantsForUser(user.ID, key.OrgID); err == nil {
+			for _, g := range gs {
+				grants[g.AccountID] = g.Role
+			}
+		}
+	}
+	_ = db.TouchKeyUsed(key.ID)
+	ctx := middleware.WithScopedDB(r.Context(), odb)
+	ctx = middleware.WithIdentity(ctx, middleware.Identity{
+		UserID: user.ID, Email: user.Email, Name: user.Name,
+		OrgID: key.OrgID, Role: m.Role, Grants: grants,
+		KeyID: key.ID, Scopes: key.Scopes,
+	})
+	next.ServeHTTP(w, r.WithContext(ctx))
+	committed = true
+	if err := tx.Commit(); err != nil {
+		log.Warn("ums: key org tx commit failed", "err", err)
+	}
+	return true
 }
 
 // ErrNoMember signals a missing membership (maps to 404 to avoid probing).
