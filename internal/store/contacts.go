@@ -67,7 +67,16 @@ func (db *DB) CreateContact(phone, name string, groupIDs []string) (*Contact, er
 		return nil, fmt.Errorf("invalid phone number")
 	}
 	c := &Contact{ID: uuid.NewString(), Phone: phone, Name: strings.TrimSpace(name)}
-	if _, err := db.Exec(`INSERT INTO contacts (id, phone, name) VALUES (?, ?, ?)`, c.ID, c.Phone, c.Name); err != nil {
+	// Stamp the request org on Postgres (scoped views); pool/legacy writes
+	// keep the 'org_default' fallback. SQLite has no org_id column.
+	var err error
+	if db.IsPostgres() {
+		_, err = db.Exec(`INSERT INTO contacts (id, phone, name, org_id) VALUES (?, ?, ?, ?)`,
+			c.ID, c.Phone, c.Name, db.orgOr(DefaultOrgID))
+	} else {
+		_, err = db.Exec(`INSERT INTO contacts (id, phone, name) VALUES (?, ?, ?)`, c.ID, c.Phone, c.Name)
+	}
+	if err != nil {
 		if isUniqueErr(err) {
 			return nil, fmt.Errorf("phone already exists")
 		}
@@ -244,8 +253,8 @@ func (db *DB) ImportContacts(items []struct {
 		var res sql.Result
 		var err error
 		if db.IsPostgres() {
-			res, err = db.Exec(`INSERT INTO contacts (id, phone, name) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
-				uuid.NewString(), phone, strings.TrimSpace(it.Name))
+			res, err = db.Exec(`INSERT INTO contacts (id, phone, name, org_id) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+				uuid.NewString(), phone, strings.TrimSpace(it.Name), db.orgOr(DefaultOrgID))
 		} else {
 			res, err = db.Exec(`INSERT OR IGNORE INTO contacts (id, phone, name) VALUES (?, ?, ?)`,
 				uuid.NewString(), phone, strings.TrimSpace(it.Name))

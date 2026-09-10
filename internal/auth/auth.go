@@ -65,8 +65,9 @@ func (s *Session) CheckPassword(pw string) bool {
 	return subtle.ConstantTimeCompare([]byte(pw), []byte(s.plainFallback)) == 1
 }
 
-// Issue sets the session cookie (valid 30 days, HttpOnly, SameSite=Lax).
-func (s *Session) Issue(w http.ResponseWriter, r *http.Request) {
+// Issue sets the session cookie (valid 30 days, HttpOnly, SameSite=Lax)
+// and returns the raw cookie value (hash it for server-side row lookup).
+func (s *Session) Issue(w http.ResponseWriter, r *http.Request) string {
 	exp := time.Now().Add(30 * 24 * time.Hour).Unix()
 	nonce := make([]byte, 16)
 	_, _ = rand.Read(nonce)
@@ -74,15 +75,17 @@ func (s *Session) Issue(w http.ResponseWriter, r *http.Request) {
 	mac := hmac.New(sha256.New, s.secret)
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	raw := payload + "." + sig
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
-		Value:    payload + "." + sig,
+		Value:    raw,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   r.TLS != nil,
 		Expires:  time.Unix(exp, 0),
 	})
+	return raw
 }
 
 // Clear removes the session cookie.

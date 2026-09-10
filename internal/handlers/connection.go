@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/devstroop/wam/internal/middleware"
+	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/views"
 	"github.com/devstroop/wam/internal/wa"
 )
@@ -21,12 +22,18 @@ type Connection struct {
 
 // Status returns live connection state.
 func (h *Connection) Status(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+		return
+	}
 	WriteJSON(w, http.StatusOK, h.WA.Status())
 }
 
 // QR returns a pairing QR: JSON {qr, expiresIn} for API, <img> for htmx.
 // Times out after ~45s waiting for the first code event.
 func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 	dataURL, err := h.WA.QRCodePNG(ctx)
@@ -44,6 +51,9 @@ func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
 
 // Pair starts phone-number linking: JSON {code} or HTML fragment.
 func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+		return
+	}
 	var phone string
 	if r.Header.Get("Content-Type") == "application/json" {
 		var body struct {
@@ -79,6 +89,9 @@ func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
 
 // Logout disconnects and wipes the session.
 func (h *Connection) Logout(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsPair); !ok {
+		return
+	}
 	if err := h.WA.Logout(); err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Logout failed", err.Error())
 		return
@@ -93,7 +106,10 @@ func (h *Connection) Logout(w http.ResponseWriter, r *http.Request) {
 
 // Detail renders the rich status card for the Connect page (distinct from the
 // compact header badge). Polled live; shows phone + push name + state.
-func (h *Connection) Detail(w http.ResponseWriter, _ *http.Request) {
+func (h *Connection) Detail(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+		return
+	}
 	st := h.WA.Status()
 	if h.Views == nil {
 		// Fallback when views unavailable (tests): compact badge.
@@ -116,7 +132,10 @@ func (h *Connection) Detail(w http.ResponseWriter, _ *http.Request) {
 // Sidebar renders the compose-style connection block below the logo
 // (polled every 15s). Offline → full-width "Link a device" button;
 // linking → amber variant; connected → account row. All open the dialog.
-func (h *Connection) Sidebar(w http.ResponseWriter, _ *http.Request) {
+func (h *Connection) Sidebar(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+		return
+	}
 	st := h.WA.Status()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	const waSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9.5 9a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg>`
@@ -140,7 +159,10 @@ func (h *Connection) Sidebar(w http.ResponseWriter, _ *http.Request) {
 
 // Dialog renders the connect dialog body: rich status + disconnect when
 // linked, otherwise Scan QR / Pair tabs.
-func (h *Connection) Dialog(w http.ResponseWriter, _ *http.Request) {
+func (h *Connection) Dialog(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := Authorize(nil, w, r, store.PermAccountsView); !ok {
+		return
+	}
 	st := h.WA.Status()
 	if h.Views == nil {
 		http.Error(w, "views unavailable", http.StatusInternalServerError)

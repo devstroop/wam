@@ -1,0 +1,17 @@
+{{define "content"}}
+<section class="card" style="max-width:24rem;margin:3rem auto">
+  <div class="card-head" style="align-items:center;text-align:center">
+    <span class="brand-mark" style="width:2.5rem;height:2.5rem">{{template "icon-msg"}}</span>
+    <p class="card-title">Email verification</p>
+  </div>
+  <div class="card-body">
+    {{if .Done}}<div role="status" class="alert alert-info">{{template "icon-alert"}}<div class="alert-title">Verified</div>
+      <div class="alert-desc">Your email is confirmed. <a href="/login">Sign in to continue</a>.</div>
+    </div>{{else if .Sent}}<div role="status" class="alert alert-info">{{template "icon-alert"}}<div class="alert-title">Check your inbox</div>
+      <div class="alert-desc">We sent a verification link (valid 24 hours).</div>
+    </div>{{else if .Error}}<div role="alert" class="alert alert-destructive">{{template "icon-alert"}}<div class="alert-title">Link invalid</div>
+      <div class="alert-desc">The link expired or was already used. <a href="/signup">Sign up again</a>.</div>
+    </div>{{else}}<p class="card-desc">Enter the verification link from your inbox to activate your account.</p>{{end}}
+  </div>
+</section>
+{{end}}

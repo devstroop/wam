@@ -106,8 +106,14 @@ func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []s
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt)); err != nil {
+	if db.IsPostgres() {
+		_, err = tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at, org_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt), db.orgOr(DefaultOrgID))
+	} else {
+		_, err = tx.Exec(`INSERT INTO campaigns (id, name, status, body_template, audience_filter, scheduled_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, c.ID, name, status, bodyTemplate, string(aud), strings.TrimSpace(scheduledAt))
+	}
+	if err != nil {
 		return nil, err
 	}
 	// Resolve audience: union of groups + explicit contacts; empty = all
@@ -162,9 +168,10 @@ func (db *DB) CreateCampaign(name, bodyTemplate string, groupIDs, contactIDs []s
 		}
 	}
 	contactIDs = contactIDsResolved
+	orgID := db.orgOr(DefaultOrgID)
 	for _, cid := range contactIDs {
 		if db.IsPostgres() {
-			_, err := tx.Exec(`INSERT INTO campaign_recipients (campaign_id, contact_id) VALUES (?, ?) ON CONFLICT DO NOTHING`, c.ID, cid)
+			_, err := tx.Exec(`INSERT INTO campaign_recipients (campaign_id, contact_id, org_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, c.ID, cid, orgID)
 			if err != nil {
 				return nil, err
 			}

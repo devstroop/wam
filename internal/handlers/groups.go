@@ -18,7 +18,11 @@ type Groups struct {
 
 // List returns all groups with member counts.
 func (h *Groups) List(w http.ResponseWriter, r *http.Request) {
-	data, err := h.Store.ListGroups()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, err := db.ListGroups()
 	if err != nil {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
@@ -28,7 +32,11 @@ func (h *Groups) List(w http.ResponseWriter, r *http.Request) {
 
 // Rows renders the group list fragment.
 func (h *Groups) Rows(w http.ResponseWriter, r *http.Request) {
-	data, err := h.Store.ListGroups()
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	data, err := db.ListGroups()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -38,6 +46,10 @@ func (h *Groups) Rows(w http.ResponseWriter, r *http.Request) {
 
 // Create adds a group.
 func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name  string `json:"name"`
 		Color string `json:"color"`
@@ -53,7 +65,7 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 		body.Name = r.FormValue("name")
 		body.Color = r.FormValue("color")
 	}
-	g, err := h.Store.CreateGroup(body.Name, body.Color)
+	g, err := db.CreateGroup(body.Name, body.Color)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -68,7 +80,11 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get returns one group.
 func (h *Groups) Get(w http.ResponseWriter, r *http.Request) {
-	g, err := h.Store.GetGroup(r.PathValue("id"))
+	_, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
+	g, err := db.GetGroup(r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -78,6 +94,10 @@ func (h *Groups) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update renames/recolors.
 func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
 	var body struct {
 		Name  string `json:"name"`
 		Color string `json:"color"`
@@ -86,7 +106,7 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body")
 		return
 	}
-	g, err := h.Store.UpdateGroup(r.PathValue("id"), body.Name, body.Color)
+	g, err := db.UpdateGroup(r.PathValue("id"), body.Name, body.Color)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -100,7 +120,11 @@ func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a group.
 func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.Store.DeleteGroup(r.PathValue("id")); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
+	if err := db.DeleteGroup(r.PathValue("id")); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
@@ -121,7 +145,11 @@ func (h *Groups) SetMembers(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body")
 		return
 	}
-	if err := h.Store.SetGroupMembers(r.PathValue("id"), body.ContactIDs); err != nil {
+	_, db, ok := Authorize(h.Store, w, r, store.PermContactsManage)
+	if !ok {
+		return
+	}
+	if err := db.SetGroupMembers(r.PathValue("id"), body.ContactIDs); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}

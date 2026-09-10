@@ -6,7 +6,20 @@
     <p class="card-desc">Sign in to your WAM workspace.</p>
   </div>
   <div class="card-body">
-    {{if .AuthDisabled}}<div role="status" aria-live="polite" aria-atomic="true" data-slot="alert" data-variant="info"
+    {{if .UMS}}
+    {{if .Error}}<div role="alert" class="alert alert-destructive" style="margin-bottom:1rem">{{template "icon-alert"}}<div class="alert-title">Sign in failed</div>
+      <div class="alert-desc">Invalid credentials or unverified email.{{if .ResendMsg}} Check your inbox for the verification link.{{end}}</div>
+    </div>{{end}}
+    <form method="post" action="/login">
+      <div class="form-row"><label class="label" for="email">Email</label><input id="email" class="input" name="email"
+          type="email" placeholder="you@company.com" autocomplete="email" required /></div>
+      <div class="form-row"><label class="label" for="pw">Password</label><input id="pw" class="input" name="password"
+          type="password" placeholder="••••••••" autocomplete="current-password" required /></div>
+      <button class="btn btn-block" type="submit">Sign in</button>
+    </form>
+    <p class="card-desc" style="margin-top:1rem;text-align:center"><a href="/signup">Create an account</a> · <a
+        href="/forgot">Forgot password?</a></p>
+    {{else}}{{if .AuthDisabled}}<div role="status" aria-live="polite" aria-atomic="true" data-slot="alert" data-variant="info"
       class="alert alert-info">{{template "icon-alert"}}<div data-slot="alert-title" class="alert-title">Authentication
         disabled</div>
       <div data-slot="alert-description" class="alert-desc">No <code>WAM_ADMIN_PASSWORD</code> set — <a
@@ -22,7 +35,7 @@
           type="password" placeholder="••••••••" autocomplete="current-password" /></div>
       <button class="btn btn-block" type="submit">Sign in</button>
     </form>
-    {{end}}
+    {{end}}{{end}}
   </div>
 </section>
 {{end}}
