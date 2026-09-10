@@ -33,7 +33,7 @@ func TestMigrateSQLiteToPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed template: %v", err)
 	}
-	camp, err := src.CreateCampaign("migrate-camp", tmpl.Body, []string{g.ID}, nil, "")
+	camp, err := src.CreateCampaign("migrate-camp", tmpl.Body, []string{g.ID}, nil, "", "")
 	if err != nil {
 		t.Fatalf("seed campaign: %v", err)
 	}

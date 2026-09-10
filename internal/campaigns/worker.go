@@ -22,7 +22,7 @@ import (
 type Worker struct {
 	app   *store.DB
 	owner *store.DB
-	wa    *wa.Service
+	wa    *wa.Manager
 	log   *slog.Logger
 	tick  time.Duration
 	batch int
@@ -31,7 +31,7 @@ type Worker struct {
 }
 
 // New builds the worker (not started).
-func New(app, owner *store.DB, w *wa.Service, log *slog.Logger) *Worker {
+func New(app, owner *store.DB, w *wa.Manager, log *slog.Logger) *Worker {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -40,7 +40,9 @@ func New(app, owner *store.DB, w *wa.Service, log *slog.Logger) *Worker {
 
 // Start launches the loop; Stop blocks until it exits.
 func (w *Worker) Start() {
-	w.wa.OnReceipt = w.onReceipt
+	w.wa.OnReceipt = func(accountID string, msgIDs []string, status string) {
+		w.onReceipt(accountID, msgIDs, status)
+	}
 	go w.loop()
 }
 
@@ -99,6 +101,11 @@ func (w *Worker) runOnceForOrg(db *store.DB) {
 	if !ok {
 		return
 	}
+	accountID, _ := w.resolveAccount(db, id)
+	if accountID == "" {
+		w.log.Warn("campaigns: no sendable account", "id", id)
+		return
+	}
 	body, err := db.CampaignBody(id)
 	if err != nil {
 		w.log.Warn("campaigns: body load failed", "id", id, "err", err)
@@ -127,17 +134,47 @@ func (w *Worker) runOnceForOrg(db *store.DB) {
 		if err != nil || status != store.CampaignSending {
 			return // paused / cancelled / done mid-batch
 		}
-		w.sendOne(db, id, body, r)
+		w.sendOne(db, accountID, id, body, r)
 		time.Sleep(time.Second)
 	}
 }
 
-func (w *Worker) sendOne(db *store.DB, campaignID, body string, r store.Recipient) {
+// resolveAccount maps a campaign to its sender (accountID, deviceJID).
+// Legacy/NULL pins fall back to the org's sole account; ambiguity or no
+// account yields "" (caller skips with a warning, never guesses).
+func (w *Worker) resolveAccount(db *store.DB, campaignID string) (string, string) {
+	if !db.IsPostgres() {
+		return store.LegacyAccountID, ""
+	}
+	accountID, deviceJID, err := db.AccountForCampaign(campaignID)
+	if err != nil {
+		w.log.Warn("campaigns: account lookup failed", "id", campaignID, "err", err)
+		return "", ""
+	}
+	if accountID != "" {
+		return accountID, deviceJID
+	}
+	accounts, err := db.AccountsByOrg(db.OrgID())
+	if err != nil {
+		w.log.Warn("campaigns: account list failed", "id", campaignID, "err", err)
+		return "", ""
+	}
+	if d := store.ResolveDefaultAccount(accounts); d != "" {
+		for _, a := range accounts {
+			if a.ID == d {
+				return a.ID, a.DeviceJID
+			}
+		}
+	}
+	return "", ""
+}
+
+func (w *Worker) sendOne(db *store.DB, accountID, campaignID, body string, r store.Recipient) {
 	text := render(body, r.Name, r.Phone)
 	jid := wa.JIDForPhone(r.Phone)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	msgID, err := w.wa.SendText(ctx, jid, text)
+	msgID, err := w.wa.SendText(ctx, accountID, jid, text)
 	if err != nil {
 		_ = db.MarkRecipient(campaignID, r.ContactID, store.RecFailed, "", shortErr(err))
 		w.log.Warn("campaigns: send failed", "campaign", campaignID, "contact", r.ContactID, "err", err)
@@ -149,7 +186,8 @@ func (w *Worker) sendOne(db *store.DB, campaignID, body string, r store.Recipien
 // onReceipt upgrades sent → delivered/read by WhatsApp message id. The org is
 // resolved via the owner handle first (fail-closed RLS hides the mapping
 // from unscoped app handles), then the update runs org-scoped.
-func (w *Worker) onReceipt(msgIDs []string, status string) {
+func (w *Worker) onReceipt(accountID string, msgIDs []string, status string) {
+	_ = accountID // msgIDs are device-unique; org scoping below is sufficient
 	for _, id := range msgIDs {
 		orgID, ok := w.owner.OrgForMsgID(id)
 		if !ok {

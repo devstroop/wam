@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/devstroop/wam/internal/middleware"
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/views"
 	"github.com/devstroop/wam/internal/wa"
@@ -13,7 +14,7 @@ import (
 type Web struct {
 	Views *views.Views
 	Store *store.DB
-	WA    *wa.Service
+	WA    *wa.Manager
 }
 
 // Index renders the public landing page. It is the catch-all for GET /,
@@ -29,7 +30,7 @@ func (h *Web) Index(w http.ResponseWriter, r *http.Request) {
 
 // Dashboard is the marketing home (live counts, funnel, WA status).
 func (h *Web) Dashboard(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, "")
+	id, db, ok := Authorize(h.Store, w, r, "")
 	if !ok {
 		return
 	}
@@ -43,11 +44,7 @@ func (h *Web) Dashboard(w http.ResponseWriter, r *http.Request) {
 			funnel = o.Funnel
 		}
 	}
-	conn := map[string]any{"Connected": false, "LoggedIn": false}
-	if h.WA != nil {
-		st := h.WA.Status()
-		conn = map[string]any{"Connected": st.Connected, "LoggedIn": st.LoggedIn, "Phone": st.Phone}
-	}
+	conn := h.connBadge(id, db)
 	h.Views.RenderApp(w, "dashboard.html", map[string]any{
 		"Title": "Dashboard", "Nav": "dashboard",
 		"Contacts": contacts, "Groups": groups,
@@ -56,14 +53,44 @@ func (h *Web) Dashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// connBadge resolves the default account status for page chrome.
+// Best-effort: any ambiguity yields the disconnected display, never an error.
+func (h *Web) connBadge(id middleware.Identity, db *store.DB) map[string]any {
+	conn := map[string]any{"Connected": false, "LoggedIn": false}
+	if h.WA == nil || db == nil {
+		return conn
+	}
+	aid := store.LegacyAccountID
+	if db.IsPostgres() {
+		var err error
+		if aid, err = ResolveViewerAccount(db, id, ""); err != nil {
+			return conn
+		}
+	}
+	st := h.WA.Status(aid)
+	return map[string]any{"Connected": st.Connected, "LoggedIn": st.LoggedIn, "Phone": st.Phone}
+}
+
 // Connect shows WhatsApp pairing status (QR/phone).
 func (h *Web) Connect(w http.ResponseWriter, r *http.Request) {
+	id, db, ok := Authorize(h.Store, w, r, "")
+	if !ok {
+		return
+	}
 	isConnected := false
 	if h.WA != nil {
-		st := h.WA.Status()
-		isConnected = st.Connected && st.LoggedIn
+		if aid, derr := ResolveViewerAccount(db, id, r.URL.Query().Get("account")); derr == nil {
+			st := h.WA.Status(aid)
+			isConnected = st.Connected && st.LoggedIn
+		}
 	}
-	h.Views.RenderApp(w, "connect.html", map[string]any{"Title": "Connect", "Nav": "connect", "IsConnected": isConnected})
+	var accounts []store.Account
+	if db != nil && db.IsPostgres() {
+		if as, err := db.AccountsByOrg(id.OrgID); err == nil {
+			accounts = visibleAccounts(id, as)
+		}
+	}
+	h.Views.RenderApp(w, "connect.html", map[string]any{"Title": "Connect", "Nav": "connect", "IsConnected": isConnected, "Accounts": accounts})
 }
 
 // Contacts lists audiences (live table + group filter options).
@@ -86,17 +113,23 @@ func (h *Web) Groups(w http.ResponseWriter, r *http.Request) {
 
 // Campaigns lists broadcasts + new-campaign form (group + template options included).
 func (h *Web) Campaigns(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, "")
+	id, db, ok := Authorize(h.Store, w, r, "")
 	if !ok {
 		return
 	}
 	var groups []store.Group
 	var templates []store.Template
+	var accounts []store.Account
 	if db != nil {
 		groups, _ = db.ListGroups()
 		templates, _ = db.ListTemplates()
+		if db.IsPostgres() {
+			if as, err := db.AccountsByOrg(id.OrgID); err == nil {
+				accounts = visibleAccounts(id, as)
+			}
+		}
 	}
-	h.Views.RenderApp(w, "campaigns.html", map[string]any{"Title": "Campaigns", "Nav": "campaigns", "Groups": groups, "Templates": templates})
+	h.Views.RenderApp(w, "campaigns.html", map[string]any{"Title": "Campaigns", "Nav": "campaigns", "Groups": groups, "Templates": templates, "Accounts": accounts})
 }
 
 // CampaignDetail shows one campaign funnel + recipients (live poll).
@@ -116,7 +149,7 @@ func (h *Web) CampaignDetail(w http.ResponseWriter, r *http.Request) {
 
 // Settings shows channel, app and data shortcuts.
 func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, "")
+	id, db, ok := Authorize(h.Store, w, r, "")
 	if !ok {
 		return
 	}
@@ -128,11 +161,7 @@ func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
 			templates = len(ts)
 		}
 	}
-	conn := map[string]any{"Connected": false, "LoggedIn": false}
-	if h.WA != nil {
-		st := h.WA.Status()
-		conn = map[string]any{"Connected": st.Connected, "LoggedIn": st.LoggedIn, "Phone": st.Phone}
-	}
+	conn := h.connBadge(id, db)
 	h.Views.RenderApp(w, "settings.html", map[string]any{
 		"Title": "Settings", "Nav": "settings",
 		"Contacts": contacts, "Groups": groups,

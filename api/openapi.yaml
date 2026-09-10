@@ -50,6 +50,8 @@ tags:
     description: SaaS identity (signup/login/verify/reset/switch). Replaces single-admin on the Postgres path.
   - name: Members
     description: Team + per-account grants (admin, members:manage).
+  - name: Accounts
+    description: WhatsApp numbers per org (pair independently; campaigns pin one).
 paths:
   /healthz:
     get:
@@ -871,6 +873,117 @@ paths:
       responses:
         '204': { description: Removed }
         '409': { description: Last admin }
+  /api/v1/accounts:
+    get:
+      tags: [Accounts]
+      operationId: listAccounts
+      summary: Viewable accounts with live status
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Accounts]
+      operationId: createAccount
+      summary: Add a pending account row (pair next; needs accounts:pair)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string }
+      responses:
+        '201': { description: Created }
+        '403': { description: Missing accounts:pair }
+  /api/v1/accounts/{account_id}:
+    get:
+      tags: [Accounts]
+      operationId: getAccount
+      summary: One account (view access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Accounts]
+      operationId: renameAccount
+      summary: Rename (needs accounts:pair)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Accounts]
+      operationId: deleteAccount
+      summary: Remove row + device (needs accounts:pair)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
+  /api/v1/accounts/{account_id}/qr:
+    post:
+      tags: [Accounts]
+      operationId: accountQR
+      summary: Pairing QR for one account (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/accounts/{account_id}/pair:
+    post:
+      tags: [Accounts]
+      operationId: accountPair
+      summary: Phone linking code for one account (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string }
+      responses:
+        '200': { description: OK }
+  /api/v1/accounts/{account_id}/logout:
+    post:
+      tags: [Accounts]
+      operationId: accountLogout
+      summary: Wipe one account device (use access)
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed }
   /api/v1/grants:
     get:
       tags: [Members]
@@ -979,6 +1092,7 @@ components:
               items: { type: string, format: uuid }
         bodyTemplate: { type: string }
         scheduledAt: { type: string, format: date-time, nullable: true }
+        waAccountId: { type: string }
         createdAt: { type: string, format: date-time }
     CampaignCreate:
       type: object
@@ -994,6 +1108,18 @@ components:
           type: array
           items: { type: string, format: uuid }
         scheduledAt: { type: string, format: date-time, nullable: true }
+        wa_account_id: { type: string, description: 'Sender account; empty resolves to the sole account (400 when ambiguous)' }
+    Account:
+      type: object
+      required: [id, orgId, status]
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        label: { type: string }
+        phone: { type: string }
+        status: { type: string, enum: [pending, connected, disconnected, logged_out] }
+        lastSeenAt: { type: string }
+        createdAt: { type: string }
     CampaignPage:
       type: object
       required: [data]

@@ -295,22 +295,26 @@ func TestUMSGrants(t *testing.T) {
 	if _, err := owner.AddMembership(u.ID, org.ID, RoleUser); err != nil {
 		t.Fatalf("membership: %v", err)
 	}
+	acc, err := owner.CreateAccount(org.ID, "Grant Test Number", u.ID)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
 
-	g, err := owner.SetGrant(u.ID, "wa-acc-1", org.ID, "member", "admin-id")
+	g, err := owner.SetGrant(u.ID, acc.ID, org.ID, "member", "admin-id")
 	if err != nil || g.Role != "member" {
 		t.Fatalf("set grant: %v", err)
 	}
-	if _, err := owner.SetGrant(u.ID, "wa-acc-1", org.ID, "superuser", "admin-id"); err == nil {
+	if _, err := owner.SetGrant(u.ID, acc.ID, org.ID, "superuser", "admin-id"); err == nil {
 		t.Fatal("bad grant role allowed")
 	}
 	gs, err := owner.GrantsForUser(u.ID, org.ID)
 	if err != nil || len(gs) != 1 {
 		t.Fatalf("list grants: %v %v", gs, err)
 	}
-	if err := owner.RemoveGrant(u.ID, "wa-acc-1"); err != nil {
+	if err := owner.RemoveGrant(u.ID, acc.ID); err != nil {
 		t.Fatalf("remove grant: %v", err)
 	}
-	if _, err := owner.GetGrant(u.ID, "wa-acc-1"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := owner.GetGrant(u.ID, acc.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("grant still present")
 	}
 }

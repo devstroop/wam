@@ -87,9 +87,14 @@
       });
     })();</script>
     <div class="form-row"><label class="label" for="cc-sched">Schedule for <span class="muted">(optional, RFC3339)</span></label><input id="cc-sched" class="input" name="scheduledAt" placeholder="2026-10-01T09:00:00Z" /></div>
+    {{if .Accounts}}<div class="form-row"><label class="label" for="cc-account">Send from</label>
+      <select id="cc-account" class="select" name="wa_account_id">
+        {{range .Accounts}}<option value="{{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.Phone}}{{end}} ({{.Status}})</option>{{end}}
+      </select>
+    </div>{{end}}
     <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
       <button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancel</button>
-      <button class="btn btn-sm" hx-post="/api/v1/campaigns" hx-include="#cc-name,#cc-template,#cc-body,#cc-sched,.cc-group,.cc-contact" hx-swap="none" onclick="setTimeout(()=>{const d=document.getElementById('create-campaign-dialog'); if(d) d.close();}, 400)">{{template "icon-send"}}Create campaign</button>
+      <button class="btn btn-sm" hx-post="/api/v1/campaigns" hx-include="#cc-name,#cc-template,#cc-body,#cc-sched,#cc-account,.cc-group,.cc-contact" hx-swap="none" onclick="setTimeout(()=>{const d=document.getElementById('create-campaign-dialog'); if(d) d.close();}, 400)">{{template "icon-send"}}Create campaign</button>
     </div>
   </form>
 </dialog>

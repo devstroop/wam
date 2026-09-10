@@ -78,12 +78,22 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	if err != nil {
 		panic("views: " + err.Error())
 	}
-	wasvc := wa.NewWithDatabase(cfg.DBPath, cfg.WAURL(), log)
-	go wasvc.AutoConnect()
+	wasvc := wa.NewManager(cfg.DBPath, cfg.WAURL(), !cfg.UsesPostgres(), log)
+	if cfg.UsesPostgres() {
+		// Pairing callbacks persist device/account state; legacy sessions
+		// upgrade into a default account row on first boot after migration.
+		wasvc.OnPaired = func(accountID, jid string) {
+			persistPairedDevice(db, accountID, jid, log)
+		}
+		ensureLegacyAccount(ownerDB, wasvc, log)
+		go wasvc.AutoConnect(connectEntries(ownerDB, log))
+	} else {
+		go wasvc.AutoConnect(nil)
+	}
 	web := &handlers.Web{Views: v, Store: db, WA: wasvc}
 	authH := &handlers.Auth{Session: sess, Login: v.RenderPage}
-	conn := &handlers.Connection{WA: wasvc, Views: v}
-	msg := &handlers.Messaging{WA: wasvc}
+	conn := &handlers.Connection{WA: wasvc, Views: v, Store: db}
+	msg := &handlers.Messaging{WA: wasvc, Store: db}
 	contacts := &handlers.Contacts{Store: db, Views: v}
 	groups := &handlers.Groups{Store: db, Views: v}
 	tmpls := &handlers.Templates{Store: db, Views: v}
@@ -179,6 +189,16 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	mux.HandleFunc("POST /api/v1/connection/qr", conn.QR)
 	mux.HandleFunc("POST /api/v1/connection/pair", conn.Pair)
 	mux.HandleFunc("POST /api/v1/connection/logout", conn.Logout)
+	// WhatsApp accounts (multi-account; no-ops on legacy SQLite).
+	accts := &handlers.Accounts{Store: db, Mgr: wasvc}
+	mux.HandleFunc("GET /api/v1/accounts", accts.List)
+	mux.HandleFunc("POST /api/v1/accounts", accts.Create)
+	mux.HandleFunc("GET /api/v1/accounts/{id}", accts.Get)
+	mux.HandleFunc("PATCH /api/v1/accounts/{id}", accts.UpdateLabel)
+	mux.HandleFunc("DELETE /api/v1/accounts/{id}", accts.Delete)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/qr", accts.QR)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/pair", accts.Pair)
+	mux.HandleFunc("POST /api/v1/accounts/{id}/logout", accts.Logout)
 	// Contacts + groups/labels (live SQLite).
 	mux.HandleFunc("GET /api/v1/contacts", contacts.List)
 	mux.HandleFunc("POST /api/v1/contacts", contacts.Create)

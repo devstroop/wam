@@ -71,7 +71,7 @@ func TestPostgresSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create template: %v", err)
 	}
-	camp, err := db.CreateCampaign("pg-smoke-camp", tmpl.Body, []string{g.ID}, nil, "")
+	camp, err := db.CreateCampaign("pg-smoke-camp", tmpl.Body, []string{g.ID}, nil, "", "")
 	if err != nil {
 		t.Fatalf("create campaign: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestPostgresAppRoleCRUD(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		camp, err := odb.CreateCampaign("pg-app-camp", tmpl.Body, []string{g.ID}, nil, "")
+		camp, err := odb.CreateCampaign("pg-app-camp", tmpl.Body, []string{g.ID}, nil, "", "")
 		if err != nil {
 			return err
 		}
