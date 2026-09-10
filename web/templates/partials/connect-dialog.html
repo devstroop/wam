@@ -1,4 +1,16 @@
 <div style="display:flex; flex-direction:column; gap:1rem;">
+  {{if .PickAccount}}
+  <div>
+    <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Choose a number</h3>
+    <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">This workspace has several WhatsApp numbers — pick one to pair or manage.</p>
+  </div>
+  <div style="display:flex; flex-direction:column; gap:.5rem;">
+    {{range .Accounts}}<button type="button" class="btn btn-outline btn-sm" style="justify-content:space-between;" hx-get="/partials/connect-dialog?account={{.ID}}" hx-target="#connect-dialog-live" hx-swap="innerHTML">
+      <span>{{if .Label}}{{.Label}}{{else}}{{.Phone}}{{end}}</span>
+      <span class="muted">{{if .Connected}}Live{{else}}{{.Status}}{{end}}</span>
+    </button>{{end}}
+  </div>
+  {{else}}
   <div>
     {{if and .Connected .LoggedIn}}
     <h3 style="margin:0; font-size:1.125rem; font-weight:600;">Connected account</h3>
@@ -8,6 +20,11 @@
     <p class="muted" style="margin:0.25rem 0 0; font-size:0.875rem;">Pair this server with your WhatsApp account.</p>
     {{end}}
   </div>
+  {{if .NoAccounts}}
+  <div role="status" class="alert alert-info">{{template "icon-alert"}}<div class="alert-title">No numbers yet</div>
+    <div class="alert-desc">Add one on the <a href="/connect">Connect page</a>, or just hit Get QR below — a number is created automatically.</div>
+  </div>
+  {{end}}
   {{if and .Connected .LoggedIn}}
   <div class="conn-detail">
     <span class="conn-avatar">{{template "icon-whatsapp"}}</span>
@@ -71,5 +88,6 @@
       e.preventDefault(); select(tabs[next].getAttribute('data-cd-tab'), true);
     });
   })();</script>
+  {{end}}
   {{end}}
 </div>

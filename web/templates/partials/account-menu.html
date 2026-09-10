@@ -1,0 +1,19 @@
+<button id="avatar-btn" type="button" class="avatar-btn" aria-label="Account" aria-haspopup="menu" aria-expanded="false" aria-controls="avatar-menu">{{.Initial}}</button>
+<div id="avatar-menu" class="avatar-menu" role="menu" hidden>
+  <div class="avatar-menu-head">
+    <span class="avatar-menu-title">{{.Name}}</span>
+    <span class="badge badge-muted">{{title .Role}}</span>
+  </div>
+  <div class="avatar-menu-mail muted">{{.Email}}</div>
+  {{if gt (len .Orgs) 1}}
+  <form hx-post="/api/v1/auth/switch" hx-swap="none" style="padding:.25rem .5rem;">
+    <label class="label" for="avatar-org">Workspace</label>
+    <select id="avatar-org" class="select" name="org_id" onchange="this.form.requestSubmit()">
+      {{range .Orgs}}<option value="{{.ID}}" {{if .Current}}selected{{end}}>{{.Name}} ({{.Role}})</option>{{end}}
+    </select>
+  </form>
+  {{else if .Orgs}}
+  <div class="avatar-menu-org muted">{{(index .Orgs 0).Name}}</div>
+  {{end}}
+  <a href="/logout" role="menuitem" class="avatar-menu-item">{{template "icon-out"}}Sign Out</a>
+</div>

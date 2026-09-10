@@ -59,6 +59,38 @@ func (h *Connection) accountCtx(w http.ResponseWriter, r *http.Request, perm str
 	return id, db, a.ID, a.DeviceJID, true
 }
 
+// pairingCtx resolves the pairing target for QR/Pair: explicit ?account=
+// (use-checked) or the org default — auto-creating a pending row when the
+// org has none, so first-time pairing never dead-ends. Legacy returns the
+// implicit account. ok=false after writing the error response.
+func (h *Connection) pairingCtx(w http.ResponseWriter, r *http.Request) (id middleware.Identity, db *store.DB, accountID, deviceJID string, ok bool) {
+	id, db, ok = Authorize(h.Store, w, r, store.PermAccountsPair)
+	if !ok {
+		return middleware.Identity{}, nil, "", "", false
+	}
+	if !db.IsPostgres() {
+		return id, db, store.LegacyAccountID, "", true
+	}
+	want := r.URL.Query().Get("account")
+	if want == "" {
+		want = r.PathValue("account_id")
+	}
+	a, err := db.EnsurePairingAccount(id.OrgID, want, id.UserID)
+	if err != nil {
+		if want != "" {
+			writeStoreError(w, r, err)
+		} else {
+			WriteProblem(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+		}
+		return middleware.Identity{}, nil, "", "", false
+	}
+	if want != "" && !store.CanAccount(id.Role, id.Grants, a.ID, true) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "no access to that WhatsApp account")
+		return middleware.Identity{}, nil, "", "", false
+	}
+	return id, db, a.ID, a.DeviceJID, true
+}
+
 // Status returns live connection state.
 func (h *Connection) Status(w http.ResponseWriter, r *http.Request) {
 	_, _, accountID, _, ok := h.accountCtx(w, r, store.PermAccountsView, false)
@@ -71,7 +103,7 @@ func (h *Connection) Status(w http.ResponseWriter, r *http.Request) {
 // QR returns a pairing QR: JSON {qr, expiresIn} for API, <img> for htmx.
 // Times out after ~45s waiting for the first code event.
 func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
-	_, _, accountID, deviceJID, ok := h.accountCtx(w, r, store.PermAccountsPair, true)
+	_, _, accountID, deviceJID, ok := h.pairingCtx(w, r)
 	if !ok {
 		return
 	}
@@ -92,7 +124,7 @@ func (h *Connection) QR(w http.ResponseWriter, r *http.Request) {
 
 // Pair starts phone-number linking: JSON {code} or HTML fragment.
 func (h *Connection) Pair(w http.ResponseWriter, r *http.Request) {
-	_, _, accountID, deviceJID, ok := h.accountCtx(w, r, store.PermAccountsPair, true)
+	_, _, accountID, deviceJID, ok := h.pairingCtx(w, r)
 	if !ok {
 		return
 	}
@@ -250,22 +282,71 @@ func jsStr(s string) string {
 }
 
 // Dialog renders the connect dialog body: rich status + disconnect when
-// linked, otherwise Scan QR / Pair tabs.
+// linked, otherwise Scan QR / Pair tabs. Never 400s on ambiguity: zero
+// accounts renders the unpaired notice, multiple accounts without an
+// explicit ?account= renders a picker. Only unknown/inaccessible explicit
+// ids error.
 func (h *Connection) Dialog(w http.ResponseWriter, r *http.Request) {
-	_, _, accountID, _, ok := h.accountCtx(w, r, store.PermAccountsView, false)
+	id, db, ok := Authorize(h.Store, w, r, store.PermAccountsView)
 	if !ok {
 		return
 	}
-	st := h.WA.Status(accountID)
 	if h.Views == nil {
 		http.Error(w, "views unavailable", http.StatusInternalServerError)
 		return
 	}
-	h.Views.RenderPartial(w, "connect-dialog", map[string]any{
-		"Connected": st.Connected, "LoggedIn": st.LoggedIn,
-		"Phone": st.Phone, "PushName": st.PushName,
-		"AccountID": accountID,
-	})
+	renderStatus := func(accountID string) {
+		st := h.WA.Status(accountID)
+		h.Views.RenderPartial(w, "connect-dialog", map[string]any{
+			"Connected": st.Connected, "LoggedIn": st.LoggedIn,
+			"Phone": st.Phone, "PushName": st.PushName,
+			"AccountID": accountID,
+		})
+	}
+	if !db.IsPostgres() {
+		renderStatus(store.LegacyAccountID)
+		return
+	}
+	want := r.URL.Query().Get("account")
+	if want != "" {
+		a, err := db.GetAccount(want)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		if !store.CanAccount(id.Role, id.Grants, a.ID, false) {
+			WriteProblem(w, r, http.StatusNotFound, "Not Found", "resource not found")
+			return
+		}
+		renderStatus(a.ID)
+		return
+	}
+	accounts, err := db.AccountsByOrg(id.OrgID)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	accounts = visibleAccounts(id, accounts)
+	switch len(accounts) {
+	case 0:
+		h.Views.RenderPartial(w, "connect-dialog", map[string]any{
+			"Connected": false, "LoggedIn": false, "NoAccounts": true,
+		})
+	case 1:
+		renderStatus(accounts[0].ID)
+	default:
+		rows := make([]map[string]any, 0, len(accounts))
+		for _, a := range accounts {
+			st := h.WA.Status(a.ID)
+			rows = append(rows, map[string]any{
+				"ID": a.ID, "Label": a.Label, "Phone": a.Phone,
+				"Status": a.Status, "Connected": st.Connected && st.LoggedIn,
+			})
+		}
+		h.Views.RenderPartial(w, "connect-dialog", map[string]any{
+			"Connected": false, "LoggedIn": false, "PickAccount": true, "Accounts": rows,
+		})
+	}
 }
 
 // fail maps WA errors to problem+json (or HTML for htmx).

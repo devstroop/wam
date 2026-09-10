@@ -35,6 +35,30 @@ type Account struct {
 // LegacyAccountID is the implicit account on the SQLite path (no table).
 const LegacyAccountID = "legacy"
 
+// EnsurePairingAccount returns the org's default pairing target: the explicit
+// want when given, else the sole account, else — when the org has no accounts
+// at all — a freshly created pending row ("My WhatsApp number") so first-time
+// pairing never dead-ends. Multi-account ambiguity still errors.
+func (db *DB) EnsurePairingAccount(orgID, want, createdBy string) (*Account, error) {
+	if !db.IsPostgres() {
+		return nil, fmt.Errorf("store: accounts require postgres")
+	}
+	if want != "" {
+		return db.GetAccount(want)
+	}
+	accounts, err := db.AccountsByOrg(orgID)
+	if err != nil {
+		return nil, err
+	}
+	if d := ResolveDefaultAccount(accounts); d != "" {
+		return db.GetAccount(d)
+	}
+	if len(accounts) > 0 {
+		return nil, fmt.Errorf("choose a WhatsApp account")
+	}
+	return db.CreateAccount(orgID, "My WhatsApp number", createdBy)
+}
+
 // CreateAccount inserts a pending account row (pairing happens via Manager).
 func (db *DB) CreateAccount(orgID, label, createdBy string) (*Account, error) {
 	if !db.IsPostgres() {

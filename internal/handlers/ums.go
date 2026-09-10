@@ -450,7 +450,7 @@ func orgNameFor(db *store.DB, orgID string) string {
 
 // Me returns the caller's identity + orgs.
 func (h *UMS) Me(w http.ResponseWriter, r *http.Request) {
-	id, db, ok := h.gate(w, r, "")
+	id, _, ok := h.gate(w, r, "")
 	if !ok {
 		return
 	}
@@ -458,9 +458,12 @@ func (h *UMS) Me(w http.ResponseWriter, r *http.Request) {
 	if ms, err := h.Store.MembershipsByUser(id.UserID); err == nil {
 		for _, m := range ms {
 			name := m.OrgID
-			if o, err := db.GetOrg(m.OrgID); err == nil {
-				name = o.Name
-			}
+			_ = h.Store.WithOrg(r.Context(), m.OrgID, func(odb *store.DB) error {
+				if o, err := odb.GetOrg(m.OrgID); err == nil {
+					name = o.Name
+				}
+				return nil
+			})
 			orgs = append(orgs, map[string]any{"id": m.OrgID, "name": name, "role": m.Role})
 		}
 	}
@@ -501,7 +504,54 @@ func (h *UMS) SwitchSubmit(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, http.StatusInternalServerError, "Store error", err.Error())
 		return
 	}
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{"orgId": body.OrgID})
+}
+
+// AccountMenu renders the avatar button + menu (identity, role, org
+// switcher) as a live partial — the app layout has no per-request identity.
+func (h *UMS) AccountMenu(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := h.gate(w, r, "")
+	if !ok {
+		return
+	}
+	type orgRow struct {
+		ID      string
+		Name    string
+		Role    string
+		Current bool
+	}
+	orgs := []orgRow{}
+	if ms, err := h.Store.MembershipsByUser(id.UserID); err == nil {
+		for _, m := range ms {
+			name := m.OrgID
+			// Org names need their own org context (fail-closed RLS hides
+			// other orgs from the request transaction).
+			_ = h.Store.WithOrg(r.Context(), m.OrgID, func(odb *store.DB) error {
+				if o, err := odb.GetOrg(m.OrgID); err == nil {
+					name = o.Name
+				}
+				return nil
+			})
+			orgs = append(orgs, orgRow{ID: m.OrgID, Name: name, Role: m.Role, Current: m.OrgID == id.OrgID})
+		}
+	}
+	initial := "?"
+	if id.Email != "" {
+		initial = strings.ToUpper(string([]rune(id.Email)[0]))
+	}
+	name := id.Name
+	if name == "" {
+		name = id.Email
+	}
+	h.Views.RenderPartial(w, "account-menu", map[string]any{
+		"Initial": initial, "Name": name, "Email": id.Email,
+		"Role": id.Role, "Env": "", "Orgs": orgs,
+	})
 }
 
 // --- Team (admin: members:manage) ---

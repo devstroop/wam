@@ -75,12 +75,8 @@
       </button>
       <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem;">
         <button id="theme-toggle" type="button" class="theme-btn" aria-label="Toggle theme" title="Toggle theme"><span class="theme-icon-sun">{{template "icon-sun"}}</span><span class="theme-icon-moon">{{template "icon-moon"}}</span></button>
-        <div class="avatar-wrap">
-          <button id="avatar-btn" type="button" class="avatar-btn" aria-label="Account" aria-haspopup="menu" aria-expanded="false" aria-controls="avatar-menu">A</button>
-          <div id="avatar-menu" class="avatar-menu" role="menu" hidden>
-            <div class="avatar-menu-head"><span class="avatar-menu-title">Admin</span><span class="badge badge-muted">{{title .Env}}</span></div>
-            <a href="/logout" role="menuitem" class="avatar-menu-item">{{template "icon-out"}}Sign Out</a>
-          </div>
+        <div class="avatar-wrap" id="avatar-live" hx-get="/partials/account-menu" hx-trigger="load" hx-swap="innerHTML">
+          <button id="avatar-btn" type="button" class="avatar-btn" aria-label="Account" aria-haspopup="menu" aria-expanded="false" aria-controls="avatar-menu">…</button>
         </div>
       </div>
     </header>
@@ -146,20 +142,19 @@ function openConnectDialog(accountId){
   syncAria();
 })();
 (function(){
-  var abtn=document.getElementById('avatar-btn');
-  var menu=document.getElementById('avatar-menu');
-  if(!abtn||!menu) return;
-  function close(){ menu.hidden=true; abtn.setAttribute('aria-expanded','false'); }
-  function open(){ menu.hidden=false; abtn.setAttribute('aria-expanded','true'); }
-  abtn.addEventListener('click',function(e){
-    e.stopPropagation();
-    if(menu.hidden) open(); else close();
-  });
+  // Delegated: the avatar button is swapped in by htmx (/partials/account-menu).
+  function btn(){ return document.getElementById('avatar-btn'); }
+  function menu(){ return document.getElementById('avatar-menu'); }
+  function close(){ var m=menu(),b=btn(); if(m) m.hidden=true; if(b) b.setAttribute('aria-expanded','false'); }
   document.addEventListener('click',function(e){
-    if(!menu.hidden && !e.target.closest('.avatar-wrap')) close();
+    var b=e.target.closest ? e.target.closest('#avatar-btn') : null;
+    if(b){ e.stopPropagation(); var m=menu(); if(!m) return; if(m.hidden){ m.hidden=false; b.setAttribute('aria-expanded','true'); } else close(); return; }
+    var m=menu();
+    if(m && !m.hidden && !e.target.closest('.avatar-wrap')) close();
   });
   document.addEventListener('keydown',function(e){
-    if(e.key==='Escape' && !menu.hidden){ close(); abtn.focus(); }
+    var m=menu();
+    if(e.key==='Escape' && m && !m.hidden){ close(); var b=btn(); if(b) b.focus(); }
   });
 })();
 (function(){

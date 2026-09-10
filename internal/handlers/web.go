@@ -85,12 +85,14 @@ func (h *Web) Connect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var accounts []store.Account
+	showAccounts := false
 	if db != nil && db.IsPostgres() {
+		showAccounts = true
 		if as, err := db.AccountsByOrg(id.OrgID); err == nil {
 			accounts = visibleAccounts(id, as)
 		}
 	}
-	h.Views.RenderApp(w, "connect.html", map[string]any{"Title": "Connect", "Nav": "connect", "IsConnected": isConnected, "Accounts": accounts})
+	h.Views.RenderApp(w, "connect.html", map[string]any{"Title": "Connect", "Nav": "connect", "IsConnected": isConnected, "Accounts": accounts, "ShowAccounts": showAccounts})
 }
 
 // Contacts lists audiences (live table + group filter options).
@@ -189,7 +191,34 @@ func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
 		"Contacts": contacts, "Groups": groups,
 		"Campaigns": campaigns, "Templates": templates,
 		"Conn": conn, "Billing": billing,
+		"CanManageKeys": store.Can(id.Role, store.PermKeysManage),
+		"Keys":          h.listKeys(db, id.OrgID),
+		"Webhooks":      h.listWebhooks(db, id.OrgID),
 	})
+}
+
+// listKeys returns org keys or nil (scoped; errors collapse to nil for pages).
+func (h *Web) listKeys(db *store.DB, orgID string) []store.APIKey {
+	if db == nil || !db.IsPostgres() {
+		return nil
+	}
+	keys, err := db.ListAPIKeys(orgID)
+	if err != nil {
+		return nil
+	}
+	return keys
+}
+
+// listWebhooks returns org endpoints or nil (scoped; errors collapse to nil).
+func (h *Web) listWebhooks(db *store.DB, orgID string) []store.WebhookEndpoint {
+	if db == nil || !db.IsPostgres() {
+		return nil
+	}
+	endpoints, err := db.ListEndpoints(orgID)
+	if err != nil {
+		return nil
+	}
+	return endpoints
 }
 
 // Analytics shows delivery funnels + timeline (live aggregates).

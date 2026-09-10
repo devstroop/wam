@@ -170,6 +170,7 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 		mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
 		mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 		mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
+		mux.HandleFunc("GET /partials/account-menu", ums.AccountMenu)
 		billing := &handlers.Billing{Store: db}
 		mux.HandleFunc("GET /api/v1/billing/plan", billing.Overview)
 		mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)
@@ -261,7 +262,7 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	limited("POST /api/v1/messages/send", msg.Send, "send", middleware.OrgKey, 60, 10)
 
 	// Ops: metrics always; keys/webhooks/audit need the PG stack.
-	ops := &handlers.Ops{Store: db, WA: wasvc}
+	ops := &handlers.Ops{Store: db, Views: v, WA: wasvc}
 	mux.HandleFunc("GET /metrics", ops.Metrics)
 	if cfg.UsesPostgres() {
 		mux.HandleFunc("GET /api/v1/audit", ops.AuditList)
