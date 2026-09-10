@@ -68,7 +68,7 @@ func (db *DB) CreateContact(phone, name string, groupIDs []string) (*Contact, er
 	}
 	c := &Contact{ID: uuid.NewString(), Phone: phone, Name: strings.TrimSpace(name)}
 	if _, err := db.Exec(`INSERT INTO contacts (id, phone, name) VALUES (?, ?, ?)`, c.ID, c.Phone, c.Name); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("phone already exists")
 		}
 		return nil, err
@@ -177,7 +177,7 @@ func (db *DB) UpdateContact(id, phone, name string, groupIDs []string, changeGro
 		cur.Name = strings.TrimSpace(name)
 	}
 	if _, err := db.Exec(`UPDATE contacts SET phone = ?, name = ? WHERE id = ?`, cur.Phone, cur.Name, id); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueErr(err) {
 			return nil, fmt.Errorf("phone already exists")
 		}
 		return nil, err
@@ -216,6 +216,13 @@ func (db *DB) setMemberships(contactID string, groupIDs []string) error {
 		if strings.TrimSpace(gid) == "" {
 			continue
 		}
+		if db.IsPostgres() {
+			_, err := tx.Exec(`INSERT INTO contact_groups (contact_id, group_id) VALUES (?, ?) ON CONFLICT DO NOTHING`, contactID, gid)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO contact_groups (contact_id, group_id) VALUES (?, ?)`, contactID, gid); err != nil {
 			return err
 		}
@@ -234,8 +241,15 @@ func (db *DB) ImportContacts(items []struct {
 			skipped++
 			continue
 		}
-		res, err := db.Exec(`INSERT OR IGNORE INTO contacts (id, phone, name) VALUES (?, ?, ?)`,
-			uuid.NewString(), phone, strings.TrimSpace(it.Name))
+		var res sql.Result
+		var err error
+		if db.IsPostgres() {
+			res, err = db.Exec(`INSERT INTO contacts (id, phone, name) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+				uuid.NewString(), phone, strings.TrimSpace(it.Name))
+		} else {
+			res, err = db.Exec(`INSERT OR IGNORE INTO contacts (id, phone, name) VALUES (?, ?, ?)`,
+				uuid.NewString(), phone, strings.TrimSpace(it.Name))
+		}
 		if err != nil {
 			skipped++
 			continue

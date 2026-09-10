@@ -1,4 +1,47 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    # Secrets (POSTGRES_PASSWORD) come from .env via env_file only — never
+    # assign password values in this file (secret scanners flag them).
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - wam-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Reserved for the sender-scale queue (not yet dialed by the app).
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - wam-redis:/data
+    restart: unless-stopped
+
+  # Owner-DSN schema migration; must complete before wam boots.
+  migrate:
+    build: .
+    command: ["./wam", "migrate-schema"]
+    env_file:
+      - .env
+    environment:
+      WAM_DATABASE_URL: ${WAM_DATABASE_URL:?Set WAM_DATABASE_URL in .env (see .env.example)}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   wam:
     build: .
     ports:
@@ -11,9 +54,22 @@ services:
       WAM_PUBLIC_BASE_URL: http://localhost:8080
       WAM_DB_PATH: /data/wam.db
       WAM_DATA_DIR: /data
+      # No owner DSN here: the migrate job above owns DDL. Runtime serves via
+      # the least-privilege role so RLS bites; owner creds never land on the
+      # serving container.
+      WAM_APP_DATABASE_URL: ${WAM_APP_DATABASE_URL:?Set WAM_APP_DATABASE_URL in .env (see .env.example)}
+      # Session store DSN: owner (whatsmeow creates session tables at runtime).
+      WAM_WA_DATABASE_URL: ${WAM_WA_DATABASE_URL:?Set WAM_WA_DATABASE_URL in .env (see .env.example)}
     volumes:
       - wam-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
   wam-data:
+  wam-pgdata:
+  wam-redis:

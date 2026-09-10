@@ -1,4 +1,4 @@
-.PHONY: run build vet test fmt lint openapi-lint tidy docker-build docker-up clean
+.PHONY: run build vet test fmt lint openapi-lint tidy docker-build docker-up clean migrate migrate-schema
 
 APP := wam
 PKG := ./...
@@ -6,6 +6,15 @@ ADDR ?= :8080
 
 run:
 	go run ./cmd/wam
+
+# Import legacy SQLite into Postgres (requires WAM_DATABASE_URL).
+# Usage: make migrate [FROM=./data/wam.db] [DATABASE_URL=postgres://...]
+migrate:
+	go run ./cmd/wam migrate --from-sqlite "$${FROM:-./data/wam.db}" --database-url "$${DATABASE_URL:-$$WAM_DATABASE_URL}"
+
+# Apply pending Postgres schema migrations (use owner/superuser DSN).
+migrate-schema:
+	go run ./cmd/wam migrate-schema --database-url "$${DATABASE_URL:-$$WAM_DATABASE_URL}"
 
 build:
 	go build -o bin/$(APP) ./cmd/wam

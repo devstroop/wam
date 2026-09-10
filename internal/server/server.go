@@ -39,16 +39,20 @@ import (
 )
 
 // New builds the *http.Server with all routes and middleware.
-// It opens SQLite (creating DataDir), panicking on fatal errors like the
-// existing views/static setup.
+// It opens the store (Postgres when WAM_DATABASE_URL is set, else SQLite),
+// creating DataDir, panicking on fatal errors like the existing
+// views/static setup.
 func New(cfg config.Config, log *slog.Logger) *http.Server {
 	if cfg.DataDir != "" {
 		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 			panic("datadir: " + err.Error())
 		}
 	}
-	db, err := store.Open(cfg.DBPath)
+	db, err := store.OpenAuto(cfg.DBPath, cfg.DatabaseURL, cfg.AppDatabaseURL)
 	if err != nil {
+		if cfg.UsesPostgres() && cfg.AppDatabaseURL != "" {
+			panic("store: run wam migrate-schema with the owner DSN first: " + err.Error())
+		}
 		panic("store: " + err.Error())
 	}
 	sess := auth.New(cfg.AdminPassword, cfg.SessionSecret)
@@ -67,7 +71,7 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 	if err != nil {
 		panic("views: " + err.Error())
 	}
-	wasvc := wa.New(cfg.DBPath, log)
+	wasvc := wa.NewWithDatabase(cfg.DBPath, cfg.WAURL(), log)
 	go wasvc.AutoConnect()
 	web := &handlers.Web{Views: v, Store: db, WA: wasvc}
 	authH := &handlers.Auth{Session: sess, Login: v.RenderPage}
