@@ -45,7 +45,12 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	t.Helper()
 	sess := auth.New("", "test-secret-32-bytes-long-ok!!")
 	mailer := &captureMailer{}
-	v, err := views.New(map[string]any{})
+	v, err := views.New(map[string]any{
+		"AppName": "WAM", "AppTagline": "WhatsApp Marketing",
+		"Env": "test", "BaseURL": "http://test",
+		"HTMXVersion": "4.0.0", "SwaggerUIVersion": "5.17.14",
+		"IsDev": false, "Year": 2026,
+	})
 	if err != nil {
 		t.Fatalf("views: %v", err)
 	}
@@ -87,8 +92,11 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("GET /api/v1/connection", conn.Status)
 	mux.HandleFunc("GET /partials/connect-dialog", conn.Dialog)
 	mux.HandleFunc("GET /partials/account-menu", ums.AccountMenu)
+	web := &handlers.Web{Views: v, Store: app, WA: mgr}
+	mux.HandleFunc("GET /settings", web.Settings)
 	mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 	mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
+	mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
 	billing := &handlers.Billing{Store: app}
 	mux.HandleFunc("GET /api/v1/billing/plan", billing.Overview)
 	mux.HandleFunc("GET /api/v1/billing/plans", billing.Plans)

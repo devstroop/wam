@@ -64,6 +64,77 @@
 </div>
 {{end}}
 
+{{if .Team.Show}}
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Team</p>
+    <p class="card-desc">Members, invites and per-number access.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:1rem;">
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Member</th><th>Role</th><th>Numbers</th>{{if .CanManageTeam}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Team.Members}}<tr>
+          <td><div>{{if .UserName}}{{.UserName}}{{else}}—{{end}}</div><div class="muted" style="font-size:0.78rem;">{{.UserEmail}}</div></td>
+          <td>
+            {{if $.CanManageTeam}}
+            <form hx-patch="/api/v1/members/{{.UserID}}" hx-swap="none" style="display:inline;">
+              <select class="select" name="role" onchange="this.form.requestSubmit()" style="max-width:9rem;">
+                <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
+                <option value="user" {{if eq .Role "user"}}selected{{end}}>user</option>
+              </select>
+            </form>
+            {{else}}<span class="badge">{{.Role}}</span>{{end}}
+          </td>
+          <td>
+            {{range .Grants}}<span class="badge" style="margin-right:.25rem;">{{index $.Team.AccountLabels .AccountID}} · {{.Role}}{{if $.CanManageTeam}} <a href="#" role="button" aria-label="Revoke" hx-delete="/api/v1/grants?user_id={{.UserID}}&account_id={{.AccountID}}" hx-swap="none" hx-confirm="Revoke access?" style="text-decoration:none;">×</a>{{end}}</span>{{else}}<span class="muted">—</span>{{end}}
+          </td>
+          {{if $.CanManageTeam}}<td style="text-align:right; white-space:nowrap;">
+            {{if ne .UserID $.Team.CurrentUserID}}<button type="button" class="btn btn-ghost btn-sm" hx-delete="/api/v1/members/{{.UserID}}" hx-swap="none" hx-confirm="Remove this member?">Remove</button>{{end}}
+          </td>{{end}}
+        </tr>{{end}}
+      </tbody>
+    </table></div>
+    {{if .CanManageTeam}}
+    {{if .Team.Invites}}
+    <div>
+      <p class="muted" style="font-size:0.78rem; margin-bottom:.25rem;">Pending invites</p>
+      <div class="table-wrap"><table class="table">
+        <tbody>{{range .Team.Invites}}<tr><td>{{.Email}}</td><td><span class="badge">{{.Role}}</span></td></tr>{{end}}</tbody>
+      </table></div>
+    </div>
+    {{end}}
+    <div class="grid-2">
+      <form hx-post="/api/v1/members/invite" hx-swap="none" style="display:flex; flex-direction:column; gap:.5rem;">
+        <p class="muted" style="font-size:0.78rem;">Invite member</p>
+        <input class="input" name="email" type="email" placeholder="teammate@company.com" required />
+        <div style="display:flex; gap:.5rem;">
+          <select class="select" name="role" style="flex:1;"><option value="user">user</option><option value="admin">admin</option></select>
+          <button class="btn btn-secondary btn-sm" type="submit">Invite</button>
+        </div>
+      </form>
+      <form hx-post="/api/v1/grants" hx-swap="none" style="display:flex; flex-direction:column; gap:.5rem;">
+        <p class="muted" style="font-size:0.78rem;">Grant number access</p>
+        <select class="select" name="user_id" required>
+          <option value="">Member…</option>
+          {{range .Team.Members}}<option value="{{.UserID}}">{{if .UserName}}{{.UserName}} ({{.UserEmail}}){{else}}{{.UserEmail}}{{end}}</option>{{end}}
+        </select>
+        <div style="display:flex; gap:.5rem;">
+          <select class="select" name="account_id" style="flex:1;" required>
+            <option value="">Number…</option>
+            {{range .Team.Accounts}}<option value="{{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.Phone}}{{end}}</option>{{end}}
+          </select>
+          <select class="select" name="role"><option value="member">member</option><option value="viewer">viewer</option></select>
+        </div>
+        <div><button class="btn btn-secondary btn-sm" type="submit">Grant</button></div>
+        <p class="muted" style="font-size:0.75rem;">Revoke per number from the member rows.</p>
+      </form>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{if .CanManageKeys}}
 <div class="grid-2">
   <div class="card">

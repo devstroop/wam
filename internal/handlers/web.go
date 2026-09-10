@@ -194,7 +194,57 @@ func (h *Web) Settings(w http.ResponseWriter, r *http.Request) {
 		"CanManageKeys": store.Can(id.Role, store.PermKeysManage),
 		"Keys":          h.listKeys(db, id.OrgID),
 		"Webhooks":      h.listWebhooks(db, id.OrgID),
+		"CanManageTeam": store.Can(id.Role, store.PermMembersManage),
+		"Team":          h.teamView(db, id.OrgID, id.UserID),
 	})
+}
+
+// teamMember is one row in the settings Team card.
+type teamMember struct {
+	store.Membership
+	Grants []store.Grant
+}
+
+// teamView loads members (with grants), pending invites and accounts for
+// the Team card. Errors collapse to an empty view (pages never 500).
+func (h *Web) teamView(db *store.DB, orgID, currentUserID string) map[string]any {
+	view := map[string]any{"Members": []teamMember{}, "Invites": []store.Invite{}, "Accounts": []store.Account{}, "CurrentUserID": currentUserID, "Show": false, "AccountLabels": map[string]string{}}
+	if db == nil || !db.IsPostgres() {
+		return view
+	}
+	view["Show"] = true
+	if db == nil || !db.IsPostgres() {
+		return view
+	}
+	members, err := db.MembersByOrg(orgID)
+	if err != nil {
+		return view
+	}
+	rows := make([]teamMember, 0, len(members))
+	for _, m := range members {
+		grants, _ := db.GrantsForUser(m.UserID, orgID)
+		rows = append(rows, teamMember{Membership: m, Grants: grants})
+	}
+	view["Members"] = rows
+	if invites, err := db.InvitesByOrg(orgID); err == nil {
+		view["Invites"] = invites
+	}
+	if accounts, err := db.AccountsByOrg(orgID); err == nil {
+		view["Accounts"] = accounts
+		labels := map[string]string{}
+		for _, a := range accounts {
+			name := a.Label
+			if name == "" {
+				name = a.Phone
+			}
+			if name == "" {
+				name = a.ID
+			}
+			labels[a.ID] = name
+		}
+		view["AccountLabels"] = labels
+	}
+	return view
 }
 
 // listKeys returns org keys or nil (scoped; errors collapse to nil for pages).

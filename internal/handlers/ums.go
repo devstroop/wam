@@ -777,6 +777,16 @@ func (h *UMS) RemoveGrantSubmit(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		body.UserID, body.AccountID = r.FormValue("user_id"), r.FormValue("account_id")
 	}
+	if body.UserID == "" {
+		body.UserID = r.URL.Query().Get("user_id")
+	}
+	if body.AccountID == "" {
+		body.AccountID = r.URL.Query().Get("account_id")
+	}
+	if body.UserID == "" || body.AccountID == "" {
+		WriteProblem(w, r, http.StatusBadRequest, "Bad Request", "user_id and account_id are required")
+		return
+	}
 	if err := db.RemoveGrant(body.UserID, body.AccountID); err != nil {
 		writeStoreError(w, r, err)
 		return
