@@ -41,6 +41,10 @@ func (h *UMS) gate(w http.ResponseWriter, r *http.Request, perm string) (middlew
 		}
 		return middleware.Identity{}, nil, false
 	}
+	if id.KeyAuth() && perm != "" && !id.Allows(perm) {
+		WriteProblem(w, r, http.StatusForbidden, "Forbidden", "key scope missing "+perm)
+		return middleware.Identity{}, nil, false
+	}
 	return id, db, true
 }
 
@@ -151,6 +155,7 @@ func (h *UMS) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error())
 		return
 	}
+	Audit(h.Store, middleware.Identity{OrgID: org.ID, UserID: user.ID, Email: user.Email}, "auth.signup", "org", org.ID)
 	if _, _, err := h.sendVerification(user); err != nil {
 		fail(err.Error())
 		return
@@ -246,6 +251,7 @@ func (h *UMS) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
+	Audit(h.Store, middleware.Identity{OrgID: memberships[0].OrgID, UserID: user.ID, Email: user.Email}, "auth.login", "user", user.ID)
 	if h.wantsJSON(r) {
 		WriteJSON(w, http.StatusOK, map[string]any{"id": user.ID, "email": user.Email, "orgId": memberships[0].OrgID})
 		return
@@ -257,6 +263,9 @@ func (h *UMS) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *UMS) LogoutSubmit(w http.ResponseWriter, r *http.Request) {
 	if raw, ok := h.Session.CookieValue(r); ok {
 		_ = h.Store.RevokeSession(auth.HashToken(raw))
+	}
+	if id, ok := middleware.IdentityFrom(r); ok {
+		Audit(h.Store, id, "auth.logout", "user", id.UserID)
 	}
 	h.Session.Clear(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -370,6 +379,11 @@ func (h *UMS) ResetSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.Store.RevokeUserSessions(userID)
+	if ms, err := h.Store.MembershipsByUser(userID); err == nil && len(ms) > 0 {
+		Audit(h.Store, middleware.Identity{OrgID: ms[0].OrgID, UserID: userID}, "auth.reset", "user", userID)
+	} else {
+		Audit(h.Store, middleware.Identity{UserID: userID}, "auth.reset", "user", userID)
+	}
 	if h.wantsJSON(r) {
 		WriteJSON(w, http.StatusOK, map[string]any{"reset": true})
 		return
@@ -555,6 +569,7 @@ func (h *UMS) InviteMember(w http.ResponseWriter, r *http.Request) {
 		orgName = id.OrgID
 	}
 	_ = h.Mailer.Send(inv.Email, "You're invited to "+orgName+" on WAM", mail.InviteBody(h.BaseURL, orgName, raw))
+	Audit(h.Store, id, "members.invite", "invite", inv.ID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Invite sent"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -589,6 +604,7 @@ func (h *UMS) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.Store.RevokeUserOrgSessions(userID, id.OrgID) // force re-login with new role
+	Audit(h.Store, id, "members.role", "user", userID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Role updated"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -614,6 +630,7 @@ func (h *UMS) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.Store.RevokeUserOrgSessions(userID, id.OrgID)
+	Audit(h.Store, id, "members.remove", "user", userID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Member removed"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -681,6 +698,7 @@ func (h *UMS) SetGrantSubmit(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "grants.grant", "wa_account", body.AccountID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Access granted"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -692,7 +710,7 @@ func (h *UMS) SetGrantSubmit(w http.ResponseWriter, r *http.Request) {
 
 // RemoveGrantSubmit revokes account access.
 func (h *UMS) RemoveGrantSubmit(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := h.gate(w, r, store.PermMembersManage)
+	id, db, ok := h.gate(w, r, store.PermMembersManage)
 	if !ok {
 		return
 	}
@@ -713,6 +731,7 @@ func (h *UMS) RemoveGrantSubmit(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "grants.revoke", "wa_account", body.AccountID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Access revoked"}`)
 		w.Header().Set("HX-Refresh", "true")

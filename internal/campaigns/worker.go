@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devstroop/wam/internal/notify"
 	"github.com/devstroop/wam/internal/store"
 	"github.com/devstroop/wam/internal/wa"
 )
@@ -39,6 +40,7 @@ type Worker struct {
 	app      *store.DB
 	owner    *store.DB
 	wa       MessageSender
+	notify   *notify.Dispatcher
 	log      *slog.Logger
 	tick     time.Duration
 	batch    int
@@ -50,13 +52,14 @@ type Worker struct {
 	lastSent map[string]time.Time
 }
 
-// New builds the worker (not started). Receipts wire via OnReceipt.
-func New(app, owner *store.DB, w MessageSender, log *slog.Logger) *Worker {
+// New builds the worker (not started). notify may be nil (no fan-out).
+// Receipts wire via OnReceipt.
+func New(app, owner *store.DB, w MessageSender, notify *notify.Dispatcher, log *slog.Logger) *Worker {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Worker{
-		app: app, owner: owner, wa: w, log: log,
+		app: app, owner: owner, wa: w, notify: notify, log: log,
 		tick: 5 * time.Second, batch: 10,
 		workerID: fmt.Sprintf("%s-%d", hostname(), os.Getpid()),
 		stop:     make(chan struct{}), done: make(chan struct{}),
@@ -100,10 +103,19 @@ func (w *Worker) onReceipt(msgID, status string) {
 	}
 	if err := w.app.WithOrg(context.Background(), orgID, func(odb *store.DB) error {
 		_, _ = odb.MarkByMsgID(msgID, status)
+		w.emit(odb, "message."+status, map[string]any{"message_id": msgID})
 		return nil
 	}); err != nil {
 		w.log.Warn("campaigns: receipt update failed", "msg", msgID, "err", err)
 	}
+}
+
+// emit fans out org-side (scoped view carries the org). Nil dispatcher safe.
+func (w *Worker) emit(db *store.DB, event string, data map[string]any) {
+	if w.notify == nil {
+		return
+	}
+	w.notify.Emit(db.OrgID(), event, data)
 }
 
 func (w *Worker) loop() {
@@ -224,8 +236,12 @@ func (w *Worker) runQueueForOrg(db *store.DB, orgID string) {
 			continue
 		}
 		if _, err := db.SetCampaignStatus(id, store.CampaignDone); err == nil {
+			sent := f.Sent + f.Delivered + f.Read + f.Replied
 			w.log.Info("campaigns: sending -> done", "id", id,
-				"sent", f.Sent+f.Delivered+f.Read+f.Replied, "failed", f.Failed)
+				"sent", sent, "failed", f.Failed)
+			w.emit(db, "campaign.done", map[string]any{
+				"campaign_id": id, "sent": sent, "failed": f.Failed,
+			})
 		}
 	}
 }
@@ -271,12 +287,20 @@ func (w *Worker) sendJob(db *store.DB, job store.OutboxJob) {
 	if err == nil {
 		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecSent, msgID, "")
 		_ = db.AckJob(job.ID)
+		w.emit(db, "message.sent", map[string]any{
+			"campaign_id": job.CampaignID, "contact_id": job.ContactID,
+			"phone": job.Phone, "account_id": accountID, "message_id": msgID,
+		})
 		return
 	}
 	if isPermanent(err) {
 		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecFailed, "", shortErr(err))
 		_ = db.AckJob(job.ID)
 		w.log.Warn("campaigns: send failed (permanent)", "campaign", job.CampaignID, "contact", job.ContactID, "err", err)
+		w.emit(db, "message.failed", map[string]any{
+			"campaign_id": job.CampaignID, "contact_id": job.ContactID,
+			"phone": job.Phone, "account_id": accountID, "error": shortErr(err),
+		})
 		return
 	}
 	attempts := job.Attempts + 1
@@ -284,6 +308,10 @@ func (w *Worker) sendJob(db *store.DB, job store.OutboxJob) {
 		_ = db.MarkRecipient(job.CampaignID, job.ContactID, store.RecFailed, "", shortErr(err))
 		_ = db.AckJob(job.ID)
 		w.log.Warn("campaigns: send failed (exhausted)", "campaign", job.CampaignID, "contact", job.ContactID, "err", err)
+		w.emit(db, "message.failed", map[string]any{
+			"campaign_id": job.CampaignID, "contact_id": job.ContactID,
+			"phone": job.Phone, "account_id": accountID, "error": shortErr(err),
+		})
 		return
 	}
 	_ = db.RetryJob(job.ID, attempts, time.Now())
@@ -363,6 +391,11 @@ func (w *Worker) runLegacyForOrg(db *store.DB) {
 			if _, err := db.SetCampaignStatus(id, store.CampaignDone); err == nil {
 				w.log.Info("campaigns: sending -> done", "id", id,
 					"sent", f.Sent+f.Delivered+f.Read+f.Replied, "failed", f.Failed)
+				w.emit(db, "campaign.done", map[string]any{
+					"campaign_id": id,
+					"sent":        f.Sent + f.Delivered + f.Read + f.Replied,
+					"failed":      f.Failed,
+				})
 			}
 		}
 		return
@@ -386,9 +419,17 @@ func (w *Worker) sendLegacy(db *store.DB, campaignID, body string, r store.Recip
 	if err != nil {
 		_ = db.MarkRecipient(campaignID, r.ContactID, store.RecFailed, "", shortErr(err))
 		w.log.Warn("campaigns: send failed", "campaign", campaignID, "contact", r.ContactID, "err", err)
+		w.emit(db, "message.failed", map[string]any{
+			"campaign_id": campaignID, "contact_id": r.ContactID,
+			"phone": r.Phone, "account_id": store.LegacyAccountID, "error": shortErr(err),
+		})
 		return
 	}
 	_ = db.MarkRecipient(campaignID, r.ContactID, store.RecSent, msgID, "")
+	w.emit(db, "message.sent", map[string]any{
+		"campaign_id": campaignID, "contact_id": r.ContactID,
+		"phone": r.Phone, "account_id": store.LegacyAccountID, "message_id": msgID,
+	})
 }
 
 // render substitutes {{name}} and {{phone}} (unknown vars left as-is).

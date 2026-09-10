@@ -85,6 +85,7 @@ func (h *Campaigns) Create(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns.create", "campaign", c.ID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Campaign created"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -140,14 +141,16 @@ func (h *Campaigns) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a campaign with its recipients.
 func (h *Campaigns) Delete(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
+	id, db, ok := Authorize(h.Store, w, r, store.PermCampaignsManage)
 	if !ok {
 		return
 	}
-	if err := db.DeleteCampaign(r.PathValue("id")); err != nil {
+	campaignID := r.PathValue("id")
+	if err := db.DeleteCampaign(campaignID); err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns.delete", "campaign", campaignID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"Campaign deleted"}`)
 		w.Header().Set("HX-Refresh", "true")
@@ -188,6 +191,7 @@ func (h *Campaigns) transition(w http.ResponseWriter, r *http.Request, perm, to,
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "campaigns."+to, "campaign", c.ID)
 	if middleware.IsHTMX(r) {
 		w.Header().Set("HX-Trigger", `{"toast":"`+toast+`"}`)
 		w.Header().Set("HX-Refresh", "true")

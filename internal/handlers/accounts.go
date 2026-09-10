@@ -157,6 +157,7 @@ func (h *Accounts) Create(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		return
 	}
+	Audit(db, id, "accounts.create", "wa_account", a.ID)
 	WriteJSON(w, http.StatusCreated, a)
 }
 
@@ -208,7 +209,7 @@ func (h *Accounts) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes an account row + device (pair permission).
 func (h *Accounts) Delete(w http.ResponseWriter, r *http.Request) {
-	_, db, ok := Authorize(h.Store, w, r, store.PermAccountsPair)
+	id, db, ok := Authorize(h.Store, w, r, store.PermAccountsPair)
 	if !ok {
 		return
 	}
@@ -225,6 +226,7 @@ func (h *Accounts) Delete(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
+	Audit(db, id, "accounts.delete", "wa_account", accountID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

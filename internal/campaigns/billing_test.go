@@ -67,7 +67,7 @@ func TestWorkerQuotaAutoPause(t *testing.T) {
 	t.Cleanup(func() { _, _ = owner.Exec(`DELETE FROM campaigns WHERE id = ?`, campID) })
 	t.Cleanup(func() { _, _ = owner.Exec(`DELETE FROM contacts WHERE org_id = ?`, org.ID) })
 
-	w := New(app, owner, wa.NewManager("", "", false, nil), nil)
+	w := New(app, owner, wa.NewManager("", "", false, nil), nil, nil)
 	w.tick = 0 // unused; direct runOnce
 	w.runOnce()
 
