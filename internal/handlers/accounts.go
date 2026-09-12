@@ -227,6 +227,10 @@ func (h *Accounts) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Audit(db, id, "accounts.delete", "wa_account", accountID)
+	if middleware.IsHTMX(r) {
+		w.Header().Set("HX-Trigger", `{"toast":"Number deleted"}`)
+		w.Header().Set("HX-Refresh", "true")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

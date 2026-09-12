@@ -60,8 +60,8 @@ func TestTeamSettingsCard(t *testing.T) {
 		fmt.Sprintf(`{"email":%q,"password":"password123"}`, memberEmail), "")
 	mustStatus(t, rec, http.StatusOK, "member login")
 
-	// Admin sees invite form + role controls.
-	rec, _ = doReq(t, h, "GET", "/settings", "", adminCookie)
+	// Admin sees invite form + role controls on /admin/settings.
+	rec, _ = doReq(t, h, "GET", "/admin/settings", "", adminCookie)
 	mustStatus(t, rec, http.StatusOK, "admin settings")
 	adminBody := rec.Body.String()
 	for _, want := range []string{"Team", "Invite member", "Grant number access", memberEmail, adminEmail} {
@@ -70,16 +70,19 @@ func TestTeamSettingsCard(t *testing.T) {
 		}
 	}
 
-	// Member sees the list but no management controls.
+	// Member is forbidden from /admin/settings...
+	rec, _ = doReq(t, h, "GET", "/admin/settings", "", memberCookie)
+	if rec.Code != http.StatusSeeOther && rec.Code != http.StatusForbidden {
+		t.Fatalf("member /admin/settings = %d, want redirect or 403", rec.Code)
+	}
+
+	// ...and user settings carries no team/admin content.
 	rec, _ = doReq(t, h, "GET", "/settings", "", memberCookie)
 	mustStatus(t, rec, http.StatusOK, "member settings")
 	memberBody := rec.Body.String()
-	if !strings.Contains(memberBody, "Team") || !strings.Contains(memberBody, adminEmail) {
-		t.Fatalf("member missing team list: %s", memberBody)
-	}
-	for _, notWant := range []string{"Invite member", "Grant number access", "hx-delete=\"/api/v1/members/"} {
+	for _, notWant := range []string{"Invite member", "Grant number access", "hx-delete=\"/api/v1/members/", "API keys", "Pending invites"} {
 		if strings.Contains(memberBody, notWant) {
-			t.Fatalf("member sees admin control %q", notWant)
+			t.Fatalf("user settings leaks admin content %q", notWant)
 		}
 	}
 
@@ -92,7 +95,7 @@ func TestTeamSettingsCard(t *testing.T) {
 		t.Cleanup(func() { _, _ = owner.Exec(`DELETE FROM users WHERE id = ?`, invited.ID) })
 	}
 	_ = invited
-	rec, _ = doReq(t, h, "GET", "/settings", "", adminCookie)
+	rec, _ = doReq(t, h, "GET", "/admin/settings", "", adminCookie)
 	if !strings.Contains(rec.Body.String(), "http-invitee@example.com") {
 		t.Fatal("pending invite not listed")
 	}
@@ -137,7 +140,7 @@ func TestTeamGrantsUI(t *testing.T) {
 	rec := formPost(t, h, "/api/v1/grants",
 		fmt.Sprintf("user_id=%s&account_id=%s&role=viewer", memberUser.ID, acc.ID), adminCookie)
 	mustStatus(t, rec, http.StatusOK, "grant form")
-	rec, _ = doReq(t, h, "GET", "/settings", "", adminCookie)
+	rec, _ = doReq(t, h, "GET", "/admin/settings", "", adminCookie)
 	if !strings.Contains(rec.Body.String(), "Grant Line") {
 		t.Fatalf("grant label not rendered: %s", rec.Body.String())
 	}
@@ -146,7 +149,7 @@ func TestTeamGrantsUI(t *testing.T) {
 	rec, _ = doReq(t, h, "DELETE",
 		fmt.Sprintf("/api/v1/grants?user_id=%s&account_id=%s", memberUser.ID, acc.ID), "", adminCookie)
 	mustStatus(t, rec, http.StatusNoContent, "revoke query")
-	rec, _ = doReq(t, h, "GET", "/settings", "", adminCookie)
+	rec, _ = doReq(t, h, "GET", "/admin/settings", "", adminCookie)
 	if strings.Contains(rec.Body.String(), "Grant Line · viewer") {
 		t.Fatal("revoked grant still rendered")
 	}

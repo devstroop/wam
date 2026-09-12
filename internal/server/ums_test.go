@@ -94,6 +94,7 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("GET /partials/account-menu", ums.AccountMenu)
 	web := &handlers.Web{Views: v, Store: app, WA: mgr}
 	mux.HandleFunc("GET /settings", web.Settings)
+	mux.HandleFunc("GET /accounts", web.Accounts)
 	mux.HandleFunc("POST /api/v1/grants", ums.SetGrantSubmit)
 	mux.HandleFunc("GET /api/v1/grants", ums.ListGrants)
 	mux.HandleFunc("DELETE /api/v1/grants", ums.RemoveGrantSubmit)
@@ -111,6 +112,15 @@ func testMux(t *testing.T, app *store.DB) (http.Handler, *captureMailer) {
 	mux.HandleFunc("POST /api/v1/webhooks", ops.CreateEndpoint)
 	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", ops.DeleteEndpoint)
 	mux.HandleFunc("GET /metrics", ops.Metrics)
+	mux.HandleFunc("GET /admin", web.Admin)
+	mux.HandleFunc("GET /admin/users", web.AdminUsers)
+	mux.HandleFunc("GET /admin/roles", web.AdminRoles)
+	mux.HandleFunc("GET /admin/grants", web.AdminGrants)
+	mux.HandleFunc("GET /admin/keys", web.AdminKeys)
+	mux.HandleFunc("GET /admin/webhooks", web.AdminWebhooks)
+	mux.HandleFunc("GET /admin/billing", web.AdminBilling)
+	mux.HandleFunc("GET /admin/accounts", web.AdminAccounts)
+	mux.HandleFunc("GET /admin/settings", web.AdminSettings)
 	return sess.RequireUMS(app, nil)(mux), mailer
 }
 

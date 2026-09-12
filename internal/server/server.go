@@ -181,9 +181,22 @@ func New(cfg config.Config, log *slog.Logger) *http.Server {
 		ipAuth("POST /login", authH.LoginSubmit)
 		mux.HandleFunc("POST /logout", authH.Logout)
 		mux.HandleFunc("GET /logout", authH.Logout)
+		// Avatar partial: single-admin identity (no user record in legacy).
+		legacyUMS := &handlers.UMS{Store: db, Views: v, Session: sess}
+		mux.HandleFunc("GET /partials/account-menu", legacyUMS.AccountMenu)
 	}
 	mux.HandleFunc("GET /dashboard", web.Dashboard)
+	mux.HandleFunc("GET /admin", web.Admin)
+	mux.HandleFunc("GET /admin/users", web.AdminUsers)
+	mux.HandleFunc("GET /admin/roles", web.AdminRoles)
+	mux.HandleFunc("GET /admin/grants", web.AdminGrants)
+	mux.HandleFunc("GET /admin/keys", web.AdminKeys)
+	mux.HandleFunc("GET /admin/webhooks", web.AdminWebhooks)
+	mux.HandleFunc("GET /admin/billing", web.AdminBilling)
+	mux.HandleFunc("GET /admin/accounts", web.AdminAccounts)
+	mux.HandleFunc("GET /admin/settings", web.AdminSettings)
 	mux.HandleFunc("GET /connect", web.Connect)
+	mux.HandleFunc("GET /accounts", web.Accounts)
 	mux.HandleFunc("GET /contacts", web.Contacts)
 	mux.HandleFunc("GET /groups", web.Groups)
 	mux.HandleFunc("GET /templates", tmpls.Page)

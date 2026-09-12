@@ -54,6 +54,42 @@ func Can(role, perm string) bool {
 	return set["*"] || set[perm]
 }
 
+// AllPermissions lists every permission in display order (roles page).
+func AllPermissions() []string {
+	return []string{
+		PermOrgManage,
+		PermMembersManage,
+		PermAccountsPair,
+		PermAccountsManage,
+		PermAccountsView,
+		PermAccountsUse,
+		PermContactsManage,
+		PermTemplatesManage,
+		PermCampaignsManage,
+		PermCampaignsSend,
+		PermAnalyticsView,
+		PermBillingManage,
+		PermKeysManage,
+	}
+}
+
+// PermDescriptions explains each permission (roles page).
+var PermDescriptions = map[string]string{
+	PermOrgManage:       "Rename org, manage billing-level settings",
+	PermMembersManage:   "Invite, change roles, remove members, manage grants",
+	PermAccountsPair:    "Add numbers, pair, rename, delete devices",
+	PermAccountsManage:  "Reserved: per-number lifecycle policies",
+	PermAccountsView:    "See numbers and connection status",
+	PermAccountsUse:     "Send and pair via granted numbers",
+	PermContactsManage:  "Create, edit, import and delete contacts and groups",
+	PermTemplatesManage: "Create, edit and delete message templates",
+	PermCampaignsManage: "Create, edit, pause and cancel campaigns",
+	PermCampaignsSend:   "Launch campaigns and one-off sends",
+	PermAnalyticsView:   "View funnels, timelines and exports",
+	PermBillingManage:   "Change plan, manage subscription",
+	PermKeysManage:      "Mint and revoke API keys, manage webhooks",
+}
+
 // ValidRole reports whether code is a known v1 role.
 func ValidRole(code string) bool { return code == RoleAdmin || code == RoleUser }
 

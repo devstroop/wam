@@ -1,0 +1,38 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Numbers</h1><p>{{.OrgName}} — every WhatsApp number, pairing state and lifecycle.</p></div></div>
+
+{{if .ShowAccounts}}
+<div class="card" id="numbers">
+  <div class="card-head">
+    <p class="card-title">WhatsApp numbers</p>
+    <p class="card-desc">Each number pairs independently. Per-member access lives on the Grants page.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:.75rem;">
+    {{if .Accounts}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Label</th><th>Number</th><th>Status</th><th></th></tr></thead>
+      <tbody>{{range .Accounts}}<tr>
+        <td>{{if .Label}}{{.Label}}{{else}}—{{end}}</td>
+        <td>{{if .Phone}}{{.Phone}}{{else}}—{{end}}</td>
+        <td>{{if .Connected}}<span class="badge badge-success">Live</span>{{else}}<span class="badge">{{.Status}}</span>{{end}}</td>
+        <td style="text-align:right; white-space:nowrap;">
+          <button type="button" class="btn btn-sm" onclick="openConnectDialog('{{.ID}}')">Pair / manage</button>
+          <button type="button" class="btn btn-ghost btn-sm" hx-delete="/api/v1/accounts/{{.ID}}" hx-swap="none" hx-confirm="Delete this number?">Delete</button>
+        </td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{else}}
+    <p class="muted">No numbers yet — add one below, then pair it.</p>
+    {{end}}
+    <form hx-post="/api/v1/accounts" hx-swap="none" style="display:flex; gap:.5rem; align-items:center;">
+      <input class="input" name="label" placeholder="Label e.g. Sales line" style="flex:1; min-width:0;" />
+      <button class="btn btn-secondary btn-sm" type="submit">Add number</button>
+    </form>
+  </div>
+</div>
+{{else}}
+<div class="card" id="numbers">
+  <div class="card-body"><p class="muted">Numbers need Postgres.</p></div>
+</div>
+{{end}}
+{{end}}

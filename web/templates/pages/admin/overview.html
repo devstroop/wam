@@ -1,0 +1,50 @@
+{{/* layout: admin */}}
+{{define "content"}}
+<div class="page-head"><div><h1>Admin</h1><p>{{.OrgName}} — workspace administration.</p></div></div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">Workspace</p>
+      <p class="card-desc">People and numbers at a glance.</p>
+    </div>
+    <div class="card-body" style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.875rem;">
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">Members</span><span>{{.Members}}{{if .Invites}} <span class="muted">(+{{.Invites}} invited)</span>{{end}}</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">WhatsApp numbers</span><span>{{.Accounts}} ({{.Connected}} live)</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">Contacts</span><span>{{.Contacts}}</span></div>
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">Campaigns</span><span>{{.Campaigns}} ({{.Queued}} queued)</span></div>
+      <div style="display:flex; gap:0.5rem; margin-top:.25rem;"><a class="btn btn-secondary btn-sm" href="/admin/users">{{template "icon-users"}}Manage team</a><a class="btn btn-ghost btn-sm" href="/admin/accounts">Numbers</a></div>
+    </div>
+  </div>
+  {{if .Billing}}
+  <div class="card">
+    <div class="card-head">
+      <p class="card-title">Plan &amp; usage</p>
+      <p class="card-desc">{{.Billing.PlanName}} plan · renews monthly.</p>
+    </div>
+    <div class="card-body" style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.875rem;">
+      {{range .Billing.Rows}}
+      <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">{{.Label}}</span><span>{{.Used}} / {{.Limit}}</span></div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Recent activity</p>
+    <p class="card-desc">Latest audited actions in this workspace.</p>
+  </div>
+  <div class="card-body">
+    {{if .Audit}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th></tr></thead>
+      <tbody>{{range .Audit}}<tr><td class="muted">{{.CreatedAt}}</td><td>{{if .ActorEmail}}{{.ActorEmail}}{{else}}—{{end}}</td><td><code>{{.Action}}</code></td><td class="muted">{{if .Entity}}{{.Entity}}{{if .EntityID}} {{truncate .EntityID 8}}{{end}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
+    </table></div>
+    {{else}}
+    <p class="muted">No audited activity yet.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

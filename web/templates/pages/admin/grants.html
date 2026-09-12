@@ -1,0 +1,53 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Grants</h1><p>{{.OrgName}} — which members can use which numbers. Admins see every number without a grant.</p></div></div>
+
+{{if .Team.Show}}
+<div class="card" id="grants">
+  <div class="card-head">
+    <p class="card-title">Grant number access</p>
+    <p class="card-desc">Pick a member, a number and an access level.</p>
+  </div>
+  <div class="card-body">
+    <form hx-post="/api/v1/grants" hx-swap="none" style="display:flex; flex-direction:column; gap:.5rem; max-width:32rem;">
+      <select class="select" name="user_id" required>
+        <option value="">Member…</option>
+        {{range .Team.Members}}<option value="{{.UserID}}">{{if .UserName}}{{.UserName}} ({{.UserEmail}}){{else}}{{.UserEmail}}{{end}}</option>{{end}}
+      </select>
+      <div style="display:flex; gap:.5rem;">
+        <select class="select" name="account_id" style="flex:1;" required>
+          <option value="">Number…</option>
+          {{range .Team.Accounts}}<option value="{{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.Phone}}{{end}}</option>{{end}}
+        </select>
+        <select class="select" name="role"><option value="member">member</option><option value="viewer">viewer</option></select>
+      </div>
+      <div><button class="btn btn-secondary btn-sm" type="submit">Grant</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Current grants</p>
+    <p class="card-desc">Revoke per number from the member rows.</p>
+  </div>
+  <div class="card-body">
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Member</th><th>Number</th><th>Access</th><th></th></tr></thead>
+      <tbody>
+        {{range .Team.Members}}{{$m := .}}{{range .Grants}}<tr>
+          <td><div>{{if $m.UserName}}{{$m.UserName}}{{else}}—{{end}}</div><div class="muted" style="font-size:0.78rem;">{{$m.UserEmail}}</div></td>
+          <td>{{index $.Team.AccountLabels .AccountID}}</td>
+          <td><span class="badge">{{.Role}}</span></td>
+          <td style="text-align:right; white-space:nowrap;"><button type="button" class="btn btn-ghost btn-sm" hx-delete="/api/v1/grants?user_id={{.UserID}}&account_id={{.AccountID}}" hx-swap="none" hx-confirm="Revoke access?">Revoke</button></td>
+        </tr>{{end}}{{end}}
+      </tbody>
+    </table></div>
+    <p class="muted" style="font-size:0.78rem;">{{if not .HasGrants}}No grants yet — admins see every number without a grant.{{end}}</p>
+  </div>
+</div>
+{{else}}
+<div class="card" id="grants">
+  <div class="card-body"><p class="muted">Team management needs Postgres.</p></div>
+</div>
+{{end}}
+{{end}}

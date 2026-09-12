@@ -1,0 +1,36 @@
+{{define "content"}}
+<div class="page-head"><div><h1>API keys</h1><p>Bearer tokens for <code>/api/*</code>. Secrets show once.</p></div></div>
+
+<div class="card" id="keys">
+  <div class="card-head">
+    <p class="card-title">Keys</p>
+    <p class="card-desc">Mint scoped keys, revoke any time.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:.75rem;">
+    <div id="key-created-slot"></div>
+    {{if .Keys}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th></th></tr></thead>
+      <tbody>{{range .Keys}}<tr><td>{{if .Name}}{{.Name}}{{else}}—{{end}}</td><td><code>{{.Prefix}}…</code></td><td class="muted">{{range $i, $s := .Scopes}}{{if $i}}, {{end}}<code>{{$s}}</code>{{end}}</td><td style="text-align:right"><button type="button" class="btn btn-ghost btn-sm" hx-delete="/api/v1/keys/{{.ID}}" hx-swap="none" hx-confirm="Revoke this key?">Revoke</button></td></tr>{{end}}</tbody>
+    </table></div>
+    {{else}}
+    <p class="muted">No keys yet.</p>
+    {{end}}
+    <form hx-post="/api/v1/keys" hx-target="#key-created-slot" hx-swap="innerHTML" style="display:flex; flex-direction:column; gap:.5rem; max-width:32rem;">
+      <div class="form-row"><label class="label" for="key-name">Name</label><input id="key-name" class="input" name="name" placeholder="CI deploy key" /></div>
+      <div class="form-row"><span class="label">Scopes</span>
+        <div class="check-list">
+          <label><input type="checkbox" name="scopes" value="contacts:manage" /> contacts:manage</label>
+          <label><input type="checkbox" name="scopes" value="templates:manage" /> templates:manage</label>
+          <label><input type="checkbox" name="scopes" value="campaigns:manage" /> campaigns:manage</label>
+          <label><input type="checkbox" name="scopes" value="campaigns:send" /> campaigns:send</label>
+          <label><input type="checkbox" name="scopes" value="analytics:view" /> analytics:view</label>
+          <label><input type="checkbox" name="scopes" value="accounts:view" /> accounts:view</label>
+          <label><input type="checkbox" name="scopes" value="accounts:use" /> accounts:use</label>
+        </div>
+      </div>
+      <div><button class="btn btn-secondary btn-sm" type="submit">Create key</button></div>
+    </form>
+  </div>
+</div>
+{{end}}

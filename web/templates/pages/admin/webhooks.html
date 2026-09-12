@@ -1,0 +1,34 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Webhooks</h1><p>Signed <code>POST</code> on message + campaign events.</p></div></div>
+
+<div class="card" id="webhooks">
+  <div class="card-head">
+    <p class="card-title">Endpoints</p>
+    <p class="card-desc">Add https endpoints, delete any time.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:.75rem;">
+    {{if .Webhooks}}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>URL</th><th>Events</th><th></th></tr></thead>
+      <tbody>{{range .Webhooks}}<tr><td style="word-break:break-all;">{{.URL}}</td><td class="muted">{{range $i, $e := .Events}}{{if $i}}, {{end}}<code>{{$e}}</code>{{end}}</td><td style="text-align:right"><button type="button" class="btn btn-ghost btn-sm" hx-delete="/api/v1/webhooks/{{.ID}}" hx-swap="none" hx-confirm="Delete this endpoint?">Delete</button></td></tr>{{end}}</tbody>
+    </table></div>
+    {{else}}
+    <p class="muted">No endpoints yet.</p>
+    {{end}}
+    <form hx-post="/api/v1/webhooks" hx-swap="none" style="display:flex; flex-direction:column; gap:.5rem; max-width:32rem;">
+      <div class="form-row"><label class="label" for="wh-url">URL (https)</label><input id="wh-url" class="input" name="url" type="url" placeholder="https://example.com/wam-hook" required /></div>
+      <div class="form-row"><label class="label" for="wh-secret">Secret <span class="muted">(HMAC, optional)</span></label><input id="wh-secret" class="input" name="secret" type="password" autocomplete="off" /></div>
+      <div class="form-row"><span class="label">Events</span>
+        <div class="check-list">
+          <label><input type="checkbox" name="events" value="message.sent" checked /> message.sent</label>
+          <label><input type="checkbox" name="events" value="message.delivered" checked /> message.delivered</label>
+          <label><input type="checkbox" name="events" value="message.read" /> message.read</label>
+          <label><input type="checkbox" name="events" value="message.failed" checked /> message.failed</label>
+          <label><input type="checkbox" name="events" value="campaign.done" checked /> campaign.done</label>
+        </div>
+      </div>
+      <div><button class="btn btn-secondary btn-sm" type="submit">Add endpoint</button></div>
+    </form>
+  </div>
+</div>
+{{end}}

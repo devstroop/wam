@@ -15,5 +15,6 @@
   {{else if .Orgs}}
   <div class="avatar-menu-org muted">{{(index .Orgs 0).Name}}</div>
   {{end}}
+  {{if .ShowAdmin}}<a href="/admin" role="menuitem" class="avatar-menu-item">{{template "icon-settings"}}Admin area</a>{{end}}
   <a href="/logout" role="menuitem" class="avatar-menu-item">{{template "icon-out"}}Sign Out</a>
 </div>

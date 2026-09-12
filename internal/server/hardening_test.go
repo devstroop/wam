@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devstroop/wam/internal/auth"
+	"github.com/devstroop/wam/internal/handlers"
 	"github.com/devstroop/wam/internal/store"
+	"github.com/devstroop/wam/internal/views"
 )
 
 // hardeningHarness boots owner/app handles + harness mux.
@@ -89,6 +92,9 @@ func TestDialogPicker(t *testing.T) {
 	mbody := rec.Body.String()
 	if !strings.Contains(mbody, email) || !strings.Contains(mbody, "Sign Out") {
 		t.Fatalf("menu missing identity: %s", mbody)
+	}
+	if !strings.Contains(mbody, `href="/admin"`) {
+		t.Fatalf("admin menu missing admin entry: %s", mbody)
 	}
 }
 
@@ -182,5 +188,40 @@ func TestWebhooksFormFlow(t *testing.T) {
 	mustStatus(t, rec, http.StatusCreated, "create form")
 	if rec.Header().Get("HX-Refresh") == "" {
 		t.Fatal("missing HX-Refresh")
+	}
+}
+
+// TestAccountMenuLegacy covers the single-admin (SQLite, no identity)
+// avatar partial: static Admin identity, Sign Out link, never "…"/"?".
+// Regression: the route was UMS-only, so legacy servers 404d the partial.
+func TestAccountMenuLegacy(t *testing.T) {
+	db, err := store.OpenSQLite(t.TempDir() + "/legacy-avatar.db")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	v, err := views.New(nil)
+	if err != nil {
+		t.Fatalf("views: %v", err)
+	}
+	ums := &handlers.UMS{Store: db, Views: v, Session: auth.New("", "test-secret-0123456789abcdef")}
+	req := httptest.NewRequest("GET", "/partials/account-menu", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	ums.AccountMenu(rec, req)
+	mustStatus(t, rec, http.StatusOK, "legacy account menu")
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="avatar-btn"`, // replaces the "…" placeholder
+		`>A<`,             // static initial
+		`Admin`,           // static name + role badge
+		`href="/logout"`,  // sign out works in legacy
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("legacy menu missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, ">?<") {
+		t.Fatalf("legacy menu fell back to ?: %s", body)
 	}
 }

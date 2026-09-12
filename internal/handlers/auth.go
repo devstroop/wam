@@ -15,7 +15,7 @@ type Auth struct {
 
 // LoginPage renders the sign-in form (or a disabled-auth notice).
 func (h *Auth) LoginPage(w http.ResponseWriter, r *http.Request) {
-	h.Login(w, "login.html", map[string]any{
+	h.Login(w, "auth/login.html", map[string]any{
 		"Title":        "Login",
 		"AuthDisabled": !h.Session.Enabled(),
 		"Error":        r.URL.Query().Get("error") != "",

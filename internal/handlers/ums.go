@@ -84,7 +84,7 @@ func (h *UMS) currentUser(r *http.Request) (*store.User, bool) {
 
 // SignupPage renders the registration form (?invite=token joins that org).
 func (h *UMS) SignupPage(w http.ResponseWriter, r *http.Request) {
-	h.Views.RenderPage(w, "signup.html", map[string]any{
+	h.Views.RenderPage(w, "auth/signup.html", map[string]any{
 		"Title":  "Sign up",
 		"Invite": strings.TrimSpace(r.URL.Query().Get("invite")),
 		"Error":  r.URL.Query().Get("error"),
@@ -194,7 +194,7 @@ func (h *UMS) redirectAuthed(w http.ResponseWriter, r *http.Request, to string) 
 
 // LoginPage renders the UMS sign-in form.
 func (h *UMS) LoginPage(w http.ResponseWriter, r *http.Request) {
-	h.Views.RenderPage(w, "login.html", map[string]any{
+	h.Views.RenderPage(w, "auth/login.html", map[string]any{
 		"Title":     "Login",
 		"UMS":       true,
 		"Error":     r.URL.Query().Get("error"),
@@ -289,10 +289,10 @@ func (h *UMS) VerifyPage(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		h.Views.RenderPage(w, "verify.html", map[string]any{"Title": "Verified", "Done": true})
+		h.Views.RenderPage(w, "auth/verify.html", map[string]any{"Title": "Verified", "Done": true})
 		return
 	}
-	h.Views.RenderPage(w, "verify.html", map[string]any{
+	h.Views.RenderPage(w, "auth/verify.html", map[string]any{
 		"Title": "Verify email",
 		"Sent":  r.URL.Query().Get("sent") != "",
 		"Error": r.URL.Query().Get("error") != "",
@@ -301,7 +301,7 @@ func (h *UMS) VerifyPage(w http.ResponseWriter, r *http.Request) {
 
 // ForgotPage renders the reset-request form.
 func (h *UMS) ForgotPage(w http.ResponseWriter, r *http.Request) {
-	h.Views.RenderPage(w, "forgot.html", map[string]any{
+	h.Views.RenderPage(w, "auth/forgot.html", map[string]any{
 		"Title": "Forgot password",
 		"Sent":  r.URL.Query().Get("sent") != "",
 	})
@@ -335,7 +335,7 @@ func (h *UMS) ForgotSubmit(w http.ResponseWriter, r *http.Request) {
 
 // ResetPage renders the new-password form (token in query).
 func (h *UMS) ResetPage(w http.ResponseWriter, r *http.Request) {
-	h.Views.RenderPage(w, "reset.html", map[string]any{
+	h.Views.RenderPage(w, "auth/reset.html", map[string]any{
 		"Title": "Reset password",
 		"Token": strings.TrimSpace(r.URL.Query().Get("token")),
 		"Error": r.URL.Query().Get("error") != "",
@@ -548,9 +548,19 @@ func (h *UMS) AccountMenu(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = id.Email
 	}
+	if id.Email == "" && (h.Store == nil || !h.Store.IsPostgres()) {
+		// Legacy single-admin (SQLite): password-only auth, no user record.
+		// Render a static identity so the avatar never sticks on "…".
+		// Sign Out still works via the legacy /logout route.
+		initial, name = "A", "Admin"
+		id.Role = store.RoleAdmin
+	}
+	// Admin area is a Postgres-only surface; members never see the entry.
+	showAdmin := h.Store != nil && h.Store.IsPostgres() && store.Can(id.Role, store.PermMembersManage)
 	h.Views.RenderPartial(w, "account-menu", map[string]any{
 		"Initial": initial, "Name": name, "Email": id.Email,
 		"Role": id.Role, "Env": "", "Orgs": orgs,
+		"ShowAdmin": showAdmin,
 	})
 }
 

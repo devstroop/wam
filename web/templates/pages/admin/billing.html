@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Plan &amp; usage</h1><p>{{.OrgName}} — plan limits and current usage. Renews monthly.</p></div></div>
+
+{{if .Billing}}
+<div class="card" id="billing">
+  <div class="card-head">
+    <p class="card-title">{{.Billing.PlanName}} plan</p>
+    <p class="card-desc">Plan changes live under a future billing portal.</p>
+  </div>
+  <div class="card-body" style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.875rem; max-width:32rem;">
+    {{range .Billing.Rows}}
+    <div style="display:flex; justify-content:space-between; gap:1rem;"><span class="muted">{{.Label}}</span><span>{{.Used}} / {{.Limit}}</span></div>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="card" id="billing">
+  <div class="card-body"><p class="muted">Plan &amp; usage needs Postgres.</p></div>
+</div>
+{{end}}
+{{end}}

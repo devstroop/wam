@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="page-head"><div><h1>Roles</h1><p>What each role can do. Handlers check permissions, never raw roles.</p></div></div>
+
+<div class="card">
+  <div class="card-head">
+    <p class="card-title">Permission matrix</p>
+    <p class="card-desc">Read-only. Custom roles extend the roles table in a future release.</p>
+  </div>
+  <div class="card-body">
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Permission</th><th>Meaning</th><th>admin</th><th>user</th></tr></thead>
+      <tbody>
+        {{range .Matrix}}<tr>
+          <td><code>{{.Perm}}</code></td>
+          <td class="muted">{{.Description}}</td>
+          <td style="text-align:center;">{{if .Admin}}<span class="badge badge-success">✓</span>{{else}}<span class="muted">—</span>{{end}}</td>
+          <td style="text-align:center;">{{if .User}}<span class="badge badge-success">✓</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        </tr>{{end}}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+{{end}}
