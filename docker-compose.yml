@@ -1,4 +1,19 @@
 services:
+  # One-shot ownership fix for the named volume.
+  # On aarch64 (Raspberry Pi) and any fresh host, /data is initially
+  # root-owned (volume created before image had a nonroot-owned /data).
+  # The main app runs as nonroot (65532) on distroless and would panic:
+  #   mkdir /data: permission denied / unable to open database file
+  # This init runs as root, chowns the volume, then exits.
+  # Uses busybox (multi-arch, tiny) — works on both amd64 and arm64.
+  init-data:
+    image: busybox:1.37
+    user: "0:0"
+    volumes:
+      - wam-data:/data
+    command: sh -c "chown -R 65532:65532 /data 2>/dev/null || chown -R 65532 /data; chmod 755 /data; echo init-data done"
+    restart: "no"
+
   wam:
     build: .
     ports:
@@ -7,12 +22,15 @@ services:
       - .env
     environment:
       WAM_ADDR: ":8080"
-      WAM_ENV: development
+      WAM_ENV: ${WAM_ENV:-production}
       WAM_PUBLIC_BASE_URL: http://localhost:8080
       WAM_DB_PATH: /data/wam.db
       WAM_DATA_DIR: /data
     volumes:
       - wam-data:/data
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

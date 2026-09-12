@@ -1,0 +1,21 @@
+# keep context small — secrets, caches, runtime state must never be sent to daemon
+.git
+.gitignore
+.vscode
+.idea
+*.md
+docs
+bin
+dist
+data
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.env
+wam-data
+__pycache__
+*.log
+coverage.html
+*.out
+*.test
